@@ -181,6 +181,12 @@ The package name `pi-web-casual` is available on npm at the time of writing. The
 2. Run **Actions → Publish to npm**. It defaults to a dry run.
 3. Select the publish input to publish `pi-web-casual` with provenance.
 
+## Related
+
+- [PI WEB](https://pi-web.dev/) — the web UI that hosts Casual.
+- [PI WEB plugin documentation](https://pi-web.dev/plugins) — supported contracts, installation, and reload rules.
+- [Pi coding agent](https://pi.dev/) — the agent that powers PI WEB conversations.
+
 ## Contributing
 
 Issues and pull requests are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) and follow the [Code of Conduct](CODE_OF_CONDUCT.md). For security reports, use the process in [SECURITY.md](SECURITY.md).
