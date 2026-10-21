@@ -1,0 +1,75 @@
+name: Bug report
+description: Something is not working in Casual
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please include enough detail to reproduce it.
+
+  - type: input
+    id: piweb-version
+    attributes:
+      label: PI WEB version
+      description: Found in Settings, the Info tab, or the version output.
+      placeholder: "e.g. 1.202610.6"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install
+    attributes:
+      label: Install method
+      options:
+        - GitHub URL / Pi packages
+        - npm
+        - Local symlink / development checkout
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and OS
+      placeholder: "e.g. Safari 18 on macOS 15, Chrome on Android"
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Reload PI WEB
+        2. Click the ⁂ button
+        3. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Console errors
+      description: Paste any browser console errors, especially from the PI WEB page.
+      render: text
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Screenshots or additional context

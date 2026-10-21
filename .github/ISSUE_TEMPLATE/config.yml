@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: PI WEB plugin documentation
+    url: https://pi-web.dev/plugins
+    about: Supported plugin contracts, installation, and reload/restart rules.
+  - name: PI WEB
+    url: https://pi-web.dev/
+    about: The web UI that hosts this plugin.
