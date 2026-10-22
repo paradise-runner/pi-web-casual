@@ -1,5 +1,14 @@
 const BUTTON_ATTR = "data-pi-web-casual-button";
 const HIDDEN_PROJECT_ATTR = "data-pi-web-casual-hidden";
+const EMBED_STYLE_ATTR = "data-pi-web-casual-embed";
+/** Window name of the frame the Casual panel embeds, so the plugin stays quiet inside it. */
+export const EMBED_FRAME_NAME = "pi-web-casual-embed";
+const EMBED_CHROME = [
+    "app-context-bar",
+    "app-navigation-panel",
+    "workspace-panel",
+    "app-mobile-main-tabs",
+];
 const CASUAL_PROJECT_PATH = /[\\/]\.casual-pi-web$/i;
 const HOST_TAGS = [
     "app-context-bar",
@@ -33,12 +42,12 @@ export function knownShadowRoots() {
     }
     return roots;
 }
-function makeButton(kind, onOpen) {
+function makeButton(kind, onOpen, labels) {
     const button = document.createElement("button");
     button.type = "button";
     button.setAttribute(BUTTON_ATTR, kind);
-    button.title = "Casual chat (\u2042)";
-    button.setAttribute("aria-label", "Open Casual chat");
+    button.title = labels.title;
+    button.setAttribute("aria-label", labels.aria);
     button.textContent = "\u2042";
     if (kind === "mobile") {
         // Reuse the context-bar button rules from the host shadow root.
@@ -66,6 +75,13 @@ function makeButton(kind, onOpen) {
         onOpen();
     });
     return button;
+}
+function applyLabels(button, labels) {
+    if (button.title !== labels.title)
+        button.title = labels.title;
+    if (button.getAttribute("aria-label") !== labels.aria) {
+        button.setAttribute("aria-label", labels.aria);
+    }
 }
 function isCasualProjectRow(row) {
     const path = row.getAttribute("title") ?? "";
@@ -117,29 +133,44 @@ function hideCasualProjectRows(root) {
  * project from the sidebar. PI WEB has no supported contribution points for
  * either surface, so this is deliberately best-effort and isolated here; a
  * page update may change the selectors.
+ *
+ * `labels` is re-read on every pass so the button describes what the next click
+ * will do: open Casual from a project, or return to the project chat from
+ * Casual.
  */
-export function startCasualHostBridge(onOpen, signal) {
+export function startCasualHostBridge(onOpen, signal, labels) {
+    // Inside the panel's embedded frame the surrounding chrome is trimmed, and a
+    // second \u2042 button or sidebar filter there would fight the surface around it.
+    if (isEmbeddedFrame())
+        return;
     const ensure = () => {
         if (signal.aborted)
             return;
         try {
+            const current = labels();
             for (const root of knownShadowRoots()) {
                 hideCasualProjectRows(root);
                 for (const actions of root.querySelectorAll(".context-actions")) {
-                    if (actions.querySelector(`[${BUTTON_ATTR}]`) !== null)
+                    const existing = actions.querySelector(`[${BUTTON_ATTR}]`);
+                    if (existing !== null) {
+                        applyLabels(existing, current);
                         continue;
+                    }
                     const lightning = actions.querySelector('button[aria-label="Show Actions"]');
                     if (lightning === null)
                         continue;
-                    actions.insertBefore(makeButton("mobile", onOpen), lightning);
+                    actions.insertBefore(makeButton("mobile", onOpen, current), lightning);
                 }
                 for (const actions of root.querySelectorAll(".header-actions")) {
-                    if (actions.querySelector(`[${BUTTON_ATTR}]`) !== null)
+                    const existing = actions.querySelector(`[${BUTTON_ATTR}]`);
+                    if (existing !== null) {
+                        applyLabels(existing, current);
                         continue;
+                    }
                     const anchor = Array.from(actions.querySelectorAll("button")).find((button) => (button.textContent ?? "").trim() === "Actions");
                     if (anchor === undefined)
                         continue;
-                    actions.insertBefore(makeButton("header", onOpen), anchor);
+                    actions.insertBefore(makeButton("header", onOpen, current), anchor);
                 }
             }
         }
@@ -164,7 +195,110 @@ export function startCasualHostBridge(onOpen, signal) {
         }
     }, { once: true });
 }
-/** Select the plugin's application tab, which mounts the panel and auto-opens. */
+/** True when this document is the embedded frame the Casual panel renders. */
+export function isEmbeddedFrame() {
+    return window.name === EMBED_FRAME_NAME;
+}
+/**
+ * Turn a same-origin PI WEB frame into a chat-only surface and keep it that way.
+ *
+ * The frame is a full SPA: `chat-view` appears only after it boots, and Lit may
+ * recreate shell nodes later, so a single pass at `load` is not enough. Each
+ * pass injects a persistent stylesheet for the known chrome, hides the sibling
+ * branches above the chat, and leaves the chat's own ancestors alone — the
+ * transcript can never be hidden by this code.
+ */
+const EMBED_STYLE_CSS = `
+  app-context-bar, app-mobile-main-tabs, app-navigation-panel, workspace-panel,
+  status-bar, navigation { display: none !important; }
+  :host { background: var(--pi-bg); }
+  chat-view { min-height: 0; }
+`;
+function embedFrameRoot(frame) {
+    let doc = null;
+    try {
+        doc = frame.contentDocument;
+    }
+    catch {
+        return null; // cross-origin frame
+    }
+    if (doc === null)
+        return null;
+    return doc.querySelector("pi-web-app")?.shadowRoot ?? null;
+}
+function hideSiblingsAbove(keep) {
+    let node = keep;
+    while (node !== null && node.parentElement !== null) {
+        const parent = node.parentElement;
+        for (const sibling of Array.from(parent.children)) {
+            if (sibling === node)
+                continue;
+            const tag = sibling.tagName;
+            if (tag === "STYLE" || tag === "SCRIPT" || tag === "LINK")
+                continue;
+            const style = sibling.style;
+            if (style.getPropertyValue("display") !== "none") {
+                style.setProperty("display", "none", "important");
+            }
+        }
+        node = parent;
+    }
+}
+/** One enforcement pass. Returns false until the frame has a chat to keep. */
+function enforceEmbeddedChat(frame) {
+    const root = embedFrameRoot(frame);
+    if (root === null)
+        return false;
+    if (root.querySelector(`style[${EMBED_STYLE_ATTR}]`) === null) {
+        const doc = frame.contentDocument;
+        if (doc === null)
+            return false;
+        const style = doc.createElement("style");
+        style.setAttribute(EMBED_STYLE_ATTR, "1");
+        style.textContent = EMBED_STYLE_CSS;
+        root.append(style);
+    }
+    const chat = root.querySelector("chat-view");
+    if (chat === null)
+        return false;
+    // Keep the composer: start at the lowest ancestor that contains both the
+    // transcript and the prompt editor, then hide everything beside that branch.
+    const composer = root.querySelector("prompt-editor");
+    let surface = chat;
+    if (composer !== null) {
+        let candidate = chat;
+        while (candidate !== null && !candidate.contains(composer))
+            candidate = candidate.parentElement;
+        if (candidate !== null)
+            surface = candidate;
+    }
+    hideSiblingsAbove(surface);
+    return true;
+}
+const supervised = new WeakMap();
+/** Start (or refresh) supervision of an embedded frame. Safe to call repeatedly. */
+export function superviseEmbeddedChat(frame) {
+    const existing = supervised.get(frame);
+    if (existing !== undefined) {
+        enforceEmbeddedChat(frame);
+        return;
+    }
+    const started = Date.now();
+    const tick = () => {
+        if (!frame.isConnected || Date.now() - started > 300_000) {
+            window.clearInterval(timer);
+            supervised.delete(frame);
+            return;
+        }
+        enforceEmbeddedChat(frame);
+    };
+    const timer = window.setInterval(tick, 300);
+    supervised.set(frame, timer);
+    frame.addEventListener("load", () => enforceEmbeddedChat(frame));
+    enforceEmbeddedChat(frame);
+}
+/** Select the plugin's application tab. The tab only shows the Casual card; callers that
+ * need the chat set an open/return intent first. */
 export function clickCasualTab() {
     for (const root of knownShadowRoots()) {
         for (const label of root.querySelectorAll(".tab-label")) {

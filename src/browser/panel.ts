@@ -1,45 +1,28 @@
 import type { TemplateResult } from "lit";
 import type { ApplicationPanelContext, PluginProject } from "@jmfederico/pi-web/plugin-api";
 import {
+  captureProjectChatPoint,
+  casualChatSrc,
   changeCasualHome,
   chooseProject,
   getStatus,
   newCasualChat,
   openCasual,
+  openCasualInOwnTab,
   panelOpenContext,
+  refreshCasualPointer,
   resetCasualLink,
   setLatestPanelContext,
-  shouldAutoOpenOnMount,
+  takeOpenIntent,
   type CasualStatus,
   type OpenContext,
 } from "./casual.js";
-import { clickActionsButton } from "./dom.js";
+import { clickActionsButton, EMBED_FRAME_NAME, isEmbeddedFrame, superviseEmbeddedChat } from "./dom.js";
 import { readRecord } from "./store.js";
 
 type HtmlTag = (strings: TemplateStringsArray, ...values: unknown[]) => TemplateResult;
 
-let probeContext: OpenContext | undefined;
-
-class CasualPanelProbe extends HTMLElement {
-  private mounted = false;
-
-  connectedCallback(): void {
-    this.mounted = true;
-    const context = probeContext;
-    if (context === undefined) return;
-    void shouldAutoOpenOnMount(context).then((shouldOpen) => {
-      if (shouldOpen && this.mounted && context === probeContext) void openCasual(context);
-    });
-  }
-
-  disconnectedCallback(): void {
-    this.mounted = false;
-  }
-}
-
-if (customElements.get("pi-web-casual-probe") === undefined) {
-  customElements.define("pi-web-casual-probe", CasualPanelProbe);
-}
+const NO_CONVERSATION = "No conversation yet";
 
 const cardStyle = [
   "box-sizing:border-box",
@@ -82,6 +65,15 @@ const smallButtonStyle = [
   "color:var(--pi-muted)",
   "cursor:pointer",
 ].join(";");
+const frameStyle = [
+  "box-sizing:border-box",
+  "width:100%",
+  "height:max(420px,calc(100vh - 170px))",
+  "border:0",
+  "background:var(--pi-bg)",
+  "display:block",
+].join(";");
+
 const projectButtonStyle = [
   "display:grid",
   "gap:2px",
@@ -99,22 +91,48 @@ const projectButtonStyle = [
 export function renderPanel(html: HtmlTag, context: ApplicationPanelContext): TemplateResult {
   const open = panelOpenContext(context);
   setLatestPanelContext(open);
-  probeContext = open;
+  // Visiting the tab is the last moment the project chat is still selected, so
+  // the toggle's return point is refreshed here, not only during open.
+  captureProjectChatPoint(open);
+  // An explicit request (⁂ with no panel yet) opens the chat; the tab itself
+  // always renders the card so Casual stays a view of its own.
+  if (takeOpenIntent()) queueMicrotask(() => void openCasual(open));
   const status = getStatus(context.machine.id);
   const record = readRecord(context.machine.id);
   const sessionLabel =
     record.sessionName ??
-    (record.sessionId === undefined ? "No conversation yet" : `Session ${record.sessionId.slice(0, 8)}`);
+    (record.sessionId === undefined ? NO_CONVERSATION : `Session ${record.sessionId.slice(0, 8)}`);
   const location = record.workspacePath ?? record.projectPath ?? "";
+  const src = casualChatSrc(open);
+  // Keep the embedded chat pointed at the newest live session, without
+  // navigating the tab the user is looking at.
+  if (src !== undefined && !isEmbeddedFrame()) void refreshCasualPointer(open);
+
+  // A remembered conversation makes the tab a chat and nothing else: no card,
+  // no toolbar. Everything else lives in the palette, where the other Casual
+  // actions already are.
+  if (src !== undefined && !isEmbeddedFrame() && (status.kind === "idle" || status.kind === "ready")) {
+    return html`
+      <iframe
+        name=${EMBED_FRAME_NAME}
+        src=${src}
+        title="Casual chat"
+        style=${frameStyle}
+        @load=${(event: Event) => {
+          if (event.target instanceof HTMLIFrameElement) superviseEmbeddedChat(event.target);
+        }}
+      ></iframe>
+    `;
+  }
 
   const retry = (): void => void openCasual(open);
   const openActions = (): void => {
     if (!clickActionsButton()) console.warn("[pi-web-casual] could not open Actions");
   };
   const newChat = (): void => void newCasualChat(open);
+  const ownTab = (): void => void openCasualInOwnTab(open);
 
   return html`
-    <pi-web-casual-probe style="display:none"></pi-web-casual-probe>
     <div style=${cardStyle}>
       <div style=${headerStyle}>
         <span aria-hidden="true" style=${glyphStyle}>\u2042</span>
@@ -123,7 +141,7 @@ export function renderPanel(html: HtmlTag, context: ApplicationPanelContext): Te
           <span style=${mutedStyle}>One ongoing conversation outside your projects</span>
         </div>
       </div>
-      ${renderBody(html, open, status, sessionLabel, location, retry, newChat, openActions)}
+      ${renderBody(html, open, status, sessionLabel, location, retry, newChat, ownTab, openActions)}
     </div>
   `;
 }
@@ -136,12 +154,25 @@ function renderBody(
   location: string,
   retry: () => void,
   newChat: () => void,
+  ownTab: () => void,
   openActions: () => void,
 ): TemplateResult {
   if (status.kind === "idle") {
     return html`
-      <p style=${paragraphStyle}>Ready when you are.</p>
-      <div style=${rowStyle}>${button(html, "Open chat", retry, true)}${button(html, "Open Actions", openActions)}</div>
+      ${sessionLabel === NO_CONVERSATION
+        ? html`<p style=${paragraphStyle}>Ready when you are.</p>`
+        : html`
+            <div style="display:grid;gap:3px;min-width:0">
+              <strong style="font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+                >${sessionLabel}</strong
+              >
+              ${location === "" ? null : html`<span style=${mutedStyle}>${location}</span>`}
+            </div>
+          `}
+      <div style=${rowStyle}>
+        ${button(html, "Open chat", retry, true)}${button(html, "Open in its own tab", ownTab)}
+        ${button(html, "Open Actions", openActions)}
+      </div>
     `;
   }
 
@@ -195,11 +226,13 @@ function renderBody(
     ${status.message === undefined ? null : html`<p style=${mutedParagraphStyle}>${status.message}</p>`}
     <div style=${rowStyle}>
       ${button(html, "Open chat", retry, true)}
+      ${button(html, "Open in its own tab", ownTab)}
       ${button(html, "New chat", newChat)}
       ${button(html, "Open Actions", openActions)}
     </div>
     <p style=${mutedParagraphStyle}>
-      The \u2042 button and this tab reopen the same conversation. Starting a new chat leaves the previous one in Sessions.
+      Open chat uses this tab. Open in its own tab keeps your project chat open beside Casual. \u2042 opens Casual beside the
+      project chat, or closes the separate window to return. Starting a new chat leaves the previous one in Sessions.
     </p>
     <div style=${rowStyle}>
       ${smallButton(html, "Reset link", () => {

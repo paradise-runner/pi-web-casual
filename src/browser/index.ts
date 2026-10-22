@@ -5,11 +5,14 @@ import type {
   PluginActivationContext,
 } from "@jmfederico/pi-web/plugin-api";
 import {
+  casualButtonLabels,
+  changeCasualHome,
   getLatestPanelContext,
-  markCasualTabIntent,
   newCasualChat,
   openCasual,
   openCasualFromButton,
+  openCasualInOwnTab,
+  resetCasualLink,
   runtimeOpenContext,
   setSelectionService,
 } from "./casual.js";
@@ -24,16 +27,7 @@ const plugin: PiWebPlugin = {
     startCasualHostBridge(
       () => openCasualFromButton(getLatestPanelContext()),
       context.lifetimeSignal,
-    );
-
-    const onDocumentClick = (event: MouseEvent): void => {
-      if (isCasualTabClick(event)) markCasualTabIntent();
-    };
-    window.addEventListener("click", onDocumentClick, true);
-    context.lifetimeSignal.addEventListener(
-      "abort",
-      () => window.removeEventListener("click", onDocumentClick, true),
-      { once: true },
+      casualButtonLabels,
     );
 
     const actions: PluginAction[] = [
@@ -45,6 +39,13 @@ const plugin: PiWebPlugin = {
         run: (runtime) => openCasual(runtimeOpenContext(runtime)),
       },
       {
+        id: "open-tab",
+        title: "Open Casual Chat in Its Own Tab",
+        description: "Open the casual conversation in a separate browser tab so a project chat stays open",
+        group: "Casual",
+        run: (runtime) => openCasualInOwnTab(runtimeOpenContext(runtime)),
+      },
+      {
         id: "new",
         title: "New Casual Chat",
         description: "Start a fresh conversation in the casual workspace",
@@ -54,6 +55,20 @@ const plugin: PiWebPlugin = {
             ...runtimeOpenContext(runtime),
             startSession: () => runtime.startSession(),
           }),
+      },
+      {
+        id: "reset",
+        title: "Reset Casual Link",
+        description: "Forget a stale casual session link and reconnect to the newest live one",
+        group: "Casual",
+        run: (runtime) => resetCasualLink(runtimeOpenContext(runtime)),
+      },
+      {
+        id: "home",
+        title: "Change Casual Home",
+        description: "Pick a different folder or project as the casual home",
+        group: "Casual",
+        run: (runtime) => changeCasualHome(runtimeOpenContext(runtime)),
       },
       {
         id: "setup",
@@ -82,17 +97,5 @@ const plugin: PiWebPlugin = {
     };
   },
 };
-
-function isCasualTabClick(event: MouseEvent): boolean {
-  for (const node of event.composedPath()) {
-    if (!(node instanceof HTMLButtonElement)) continue;
-    if (node.hasAttribute("data-pi-web-casual-button")) continue;
-    if (node.closest(".tabs, .mobile-tabs") === null) continue;
-    const labelElement = node.querySelector(".tab-label");
-    const label = (labelElement?.textContent ?? node.getAttribute("aria-label") ?? node.title ?? "").trim();
-    if (label === "Casual" || label.startsWith("Casual,")) return true;
-  }
-  return false;
-}
 
 export default plugin;

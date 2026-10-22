@@ -123,10 +123,20 @@ export function reloadToCasualChat(
   workspaceId: string | undefined,
   sessionId: string,
 ): void {
+  window.location.assign(casualChatUrl(machineId, projectId, workspaceId, sessionId));
+}
+
+/** Route URL for the casual chat; used both for the one-time reload and for its own window. */
+export function casualChatUrl(
+  machineId: string,
+  projectId: string,
+  workspaceId: string | undefined,
+  sessionId: string,
+): string {
   const params = routeParams(machineId, projectId, workspaceId);
   params.set("session", sessionId);
   params.set("view", "chat");
-  window.location.assign(`${window.location.pathname}?${params.toString()}`);
+  return `${window.location.pathname}?${params.toString()}`;
 }
 
 /** Reload into the Casual panel so its normal flow can create the session. */

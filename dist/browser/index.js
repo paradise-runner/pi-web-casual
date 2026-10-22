@@ -1,4 +1,4 @@
-import { getLatestPanelContext, markCasualTabIntent, newCasualChat, openCasual, openCasualFromButton, runtimeOpenContext, setSelectionService, } from "./casual.js";
+import { casualButtonLabels, changeCasualHome, getLatestPanelContext, newCasualChat, openCasual, openCasualFromButton, openCasualInOwnTab, resetCasualLink, runtimeOpenContext, setSelectionService, } from "./casual.js";
 import { startCasualHostBridge } from "./dom.js";
 import { renderPanel } from "./panel.js";
 const plugin = {
@@ -6,13 +6,7 @@ const plugin = {
     name: "PI WEB Casual",
     activate: (context) => {
         setSelectionService(context.selection);
-        startCasualHostBridge(() => openCasualFromButton(getLatestPanelContext()), context.lifetimeSignal);
-        const onDocumentClick = (event) => {
-            if (isCasualTabClick(event))
-                markCasualTabIntent();
-        };
-        window.addEventListener("click", onDocumentClick, true);
-        context.lifetimeSignal.addEventListener("abort", () => window.removeEventListener("click", onDocumentClick, true), { once: true });
+        startCasualHostBridge(() => openCasualFromButton(getLatestPanelContext()), context.lifetimeSignal, casualButtonLabels);
         const actions = [
             {
                 id: "open",
@@ -20,6 +14,13 @@ const plugin = {
                 description: "Jump to your one ongoing conversation outside your projects",
                 group: "Casual",
                 run: (runtime) => openCasual(runtimeOpenContext(runtime)),
+            },
+            {
+                id: "open-tab",
+                title: "Open Casual Chat in Its Own Tab",
+                description: "Open the casual conversation in a separate browser tab so a project chat stays open",
+                group: "Casual",
+                run: (runtime) => openCasualInOwnTab(runtimeOpenContext(runtime)),
             },
             {
                 id: "new",
@@ -30,6 +31,20 @@ const plugin = {
                     ...runtimeOpenContext(runtime),
                     startSession: () => runtime.startSession(),
                 }),
+            },
+            {
+                id: "reset",
+                title: "Reset Casual Link",
+                description: "Forget a stale casual session link and reconnect to the newest live one",
+                group: "Casual",
+                run: (runtime) => resetCasualLink(runtimeOpenContext(runtime)),
+            },
+            {
+                id: "home",
+                title: "Change Casual Home",
+                description: "Pick a different folder or project as the casual home",
+                group: "Casual",
+                run: (runtime) => changeCasualHome(runtimeOpenContext(runtime)),
             },
             {
                 id: "setup",
@@ -57,19 +72,4 @@ const plugin = {
         };
     },
 };
-function isCasualTabClick(event) {
-    for (const node of event.composedPath()) {
-        if (!(node instanceof HTMLButtonElement))
-            continue;
-        if (node.hasAttribute("data-pi-web-casual-button"))
-            continue;
-        if (node.closest(".tabs, .mobile-tabs") === null)
-            continue;
-        const labelElement = node.querySelector(".tab-label");
-        const label = (labelElement?.textContent ?? node.getAttribute("aria-label") ?? node.title ?? "").trim();
-        if (label === "Casual" || label.startsWith("Casual,"))
-            return true;
-    }
-    return false;
-}
 export default plugin;

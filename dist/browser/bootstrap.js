@@ -96,10 +96,14 @@ export async function bootstrapCasual(machineId) {
 }
 /** Reload straight into the native chat for the bootstrapped conversation. */
 export function reloadToCasualChat(machineId, projectId, workspaceId, sessionId) {
+    window.location.assign(casualChatUrl(machineId, projectId, workspaceId, sessionId));
+}
+/** Route URL for the casual chat; used both for the one-time reload and for its own window. */
+export function casualChatUrl(machineId, projectId, workspaceId, sessionId) {
     const params = routeParams(machineId, projectId, workspaceId);
     params.set("session", sessionId);
     params.set("view", "chat");
-    window.location.assign(`${window.location.pathname}?${params.toString()}`);
+    return `${window.location.pathname}?${params.toString()}`;
 }
 /** Reload into the Casual panel so its normal flow can create the session. */
 export function reloadToCasualPanel(machineId, projectId, workspaceId) {

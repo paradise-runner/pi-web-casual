@@ -7,9 +7,9 @@ import type {
   PluginSelectedSession,
   PluginSelectionService,
 } from "@jmfederico/pi-web/plugin-api";
-import { bootstrapCasual, reloadToCasualChat, reloadToCasualPanel } from "./bootstrap.js";
+import { bootstrapCasual, casualChatUrl, reloadToCasualChat, reloadToCasualPanel } from "./bootstrap.js";
 import { clickCasualTab, clickStartSession, waitFor } from "./dom.js";
-import { patchRecord, readRecord, type CasualRecord } from "./store.js";
+import { patchRecord, readRecord, type CasualRecord, type ProjectChatPoint } from "./store.js";
 import type { CatalogSession, CatalogWorkspace, PluginCatalog } from "./types.js";
 
 export interface CasualSession {
@@ -45,7 +45,16 @@ const newTasks = new Map<string, Promise<void>>();
 const chooserMachines = new Set<string>();
 let selectionService: PluginSelectionService | undefined;
 let latestPanelContext: OpenContext | undefined;
-let casualIntentAt = 0;
+/**
+ * Set when an explicit control (\u2042, Open chat, the palette action) asked for
+ * the chat but only the panel mount can act on it. Clicking the Casual tab never
+ * sets this: the tab is Casual's own view and stays on the card.
+ */
+let openIntentAt = 0;
+/** Set when \u2042 is clicked before the panel has mounted, so the mount can perform the return. */
+let returnIntentAt = 0;
+/** Window name of the separate Casual tab, so later \u2042 presses focus it instead of stacking tabs. */
+const CASUAL_WINDOW_NAME = "pi-web-casual-chat";
 
 export function setSelectionService(service: PluginSelectionService | undefined): void {
   selectionService = service;
@@ -64,51 +73,15 @@ export function getStatus(machineId: string): CasualStatus {
 }
 
 /**
- * Called from a capture-phase click listener when the host's Casual tab is
- * clicked. Marking intent lets the panel auto-open on mount; if the panel is
- * already mounted, the click still needs to open the chat directly.
+ * Whether this mount should leave the card and open the chat. Only an explicit
+ * request does that; the Casual tab itself always renders the card and stays
+ * there, so the tab behaves like its own view instead of a redirect into the
+ * project chat.
  */
-export function markCasualTabIntent(): void {
-  casualIntentAt = Date.now();
-  const context = latestPanelContext;
-  const selectedMachine = selectionService?.getSnapshot().selectedMachine?.id;
-  if (
-    context === undefined ||
-    (selectedMachine !== undefined && context.machineId !== selectedMachine)
-  ) {
-    return;
-  }
-  queueMicrotask(() => {
-    if (context === latestPanelContext) void openCasual(context);
-  });
-}
-
-/**
- * Auto-open only when the user just asked for the tab, when nothing is
- * selected, or when the selected project is already the casual project.
- * This prevents a default-selected tool tab from hijacking another project's
- * chat on page load.
- */
-export async function shouldAutoOpenOnMount(context: OpenContext): Promise<boolean> {
-  const recent = Date.now() - casualIntentAt < 2000;
-  casualIntentAt = 0;
-  if (recent) return true;
-
-  const record = readRecord(context.machineId);
-  const routeProject = new URLSearchParams(window.location.search).get("project");
-  if (routeProject !== null && routeProject !== "" && routeProject !== record.projectId) {
-    return false;
-  }
-
-  // Route restoration and the initial project load can finish after the panel
-  // mounts. Give them a moment before treating "nothing selected" as a fresh
-  // app, so a default-selected tool tab cannot steal another project's chat.
-  await new Promise<void>((resolve) => window.setTimeout(resolve, 500));
-
-  const project = selectionService?.getSnapshot().selectedProject;
-  if (project === undefined) return true;
-  if (record.projectId !== undefined && record.projectId === project.id) return true;
-  return basename(project.path).toLowerCase() === ".casual-pi-web";
+export function takeOpenIntent(): boolean {
+  const requested = Date.now() - openIntentAt < 5000;
+  openIntentAt = 0;
+  return requested;
 }
 
 function setStatus(context: OpenContext, status: CasualStatus): void {
@@ -200,31 +173,289 @@ export function changeCasualHome(context: OpenContext): Promise<void> {
   return openCasual(context);
 }
 
+/** Which side of the \u2042 toggle the current selection represents. */
+export type CasualSide = "casual" | "project" | "unknown";
+
+function isCasualProject(
+  project: { readonly id: string; readonly path: string } | undefined,
+  record: CasualRecord,
+): boolean {
+  if (project === undefined) return false;
+  if (record.projectId !== undefined && record.projectId === project.id) return true;
+  return basename(project.path).toLowerCase() === ".casual-pi-web";
+}
+
+export function casualSide(): CasualSide {
+  const snapshot = selectionService?.getSnapshot();
+  const machineId = snapshot?.selectedMachine?.id ?? latestPanelContext?.machineId;
+  const project = snapshot?.selectedProject;
+  if (project === undefined || machineId === undefined) return "unknown";
+  return isCasualProject(project, readRecord(machineId)) ? "casual" : "project";
+}
+
+/** Labels for the injected \u2042 button, which toggles as well as opens. */
+export function casualButtonLabels(): { title: string; aria: string } {
+  return casualSide() === "casual"
+    ? { title: "Back to your project chat", aria: "Back to your project chat" }
+    : { title: "Open Casual chat (\u2042)", aria: "Open Casual chat" };
+}
+
 /**
- * Entry point for the injected \u2042 button. If the panel has never rendered
- * in this page load, select its tab so the panel mounts and auto-opens. If we
- * already have a context but the last attempt needs user attention, show the
- * panel rather than retrying invisibly.
+ * Remember the project chat the toggle should return to. Called when the Casual
+ * card renders (the tab is visited before anything navigates, so the selection
+ * is still the project chat) and again while Casual is opening, before
+ * navigation replaces the selection. Skipped when the current selection is
+ * Casual itself so the point is never self-referential.
  */
+export function captureProjectChatPoint(context: OpenContext): void {
+  const snapshot = selectionService?.getSnapshot();
+  const record = readRecord(context.machineId);
+  const project = snapshot?.selectedProject;
+  if (project === undefined || isCasualProject(project, record)) return;
+
+  const workspace = snapshot?.selectedWorkspace;
+  const session = snapshot?.selectedSession;
+  const point: ProjectChatPoint = {
+    projectId: project.id,
+    projectPath: project.path,
+    ...(workspace === undefined
+      ? {}
+      : {
+          ...(workspace.id === "" ? {} : { workspaceId: workspace.id }),
+          ...(workspace.path === "" ? {} : { workspacePath: workspace.path }),
+        }),
+    ...(session === undefined
+      ? {}
+      : {
+          sessionId: session.id,
+          ...(session.name === undefined ? {} : { sessionName: session.name }),
+        }),
+  };
+  patchRecord(context.machineId, { projectChat: point });
+}
+
+/**
+ * Resolve where the project side of the toggle should land. The catalog is used
+ * when available so an archived session or removed project does not produce a
+ * broken route; without it the remembered ids are used as-is.
+ */
+async function projectChatDestination(
+  context: OpenContext,
+  point: ProjectChatPoint | undefined,
+): Promise<PluginNavigationDestination | undefined> {
+  const projectId = point?.projectId;
+  if (projectId === undefined) return undefined;
+
+  const base = { machineId: context.machineId, projectId, view: "chat" as const };
+  if (context.catalog === undefined) {
+    return {
+      ...base,
+      ...(point?.workspaceId === undefined ? {} : { workspaceId: point.workspaceId }),
+      ...(point?.sessionId === undefined ? {} : { sessionId: point.sessionId }),
+    };
+  }
+
+  try {
+    const workspaces = await context.catalog.workspaces.list(projectId);
+    if (workspaces.length === 0) {
+      // The project is gone; forget the point rather than retrying it forever.
+      patchRecord(context.machineId, { projectChat: undefined });
+      return undefined;
+    }
+    const workspace =
+      workspaces.find((candidate) => candidate.id === point?.workspaceId) ??
+      workspaces.find((candidate) => candidate.isMain) ??
+      workspaces[0];
+    if (workspace === undefined) return undefined;
+    const sessions = await context.catalog.sessions.list({
+      projectId,
+      workspaceId: workspace.id,
+    });
+    const live = sessions.filter((session) => !session.archived);
+    const session = live.find((candidate) => candidate.id === point?.sessionId) ?? live[0];
+    return {
+      ...base,
+      workspaceId: workspace.id,
+      ...(session === undefined ? {} : { sessionId: session.id }),
+    };
+  } catch (error) {
+    console.warn("[pi-web-casual] could not verify the project chat", error);
+    return {
+      ...base,
+      ...(point?.workspaceId === undefined ? {} : { workspaceId: point.workspaceId }),
+      ...(point?.sessionId === undefined ? {} : { sessionId: point.sessionId }),
+    };
+  }
+}
+
+/** Leave Casual for the remembered project chat, or the project list when there is none. */
+export async function backToProjectChat(context: OpenContext): Promise<void> {
+  const destination = await projectChatDestination(
+    context,
+    readRecord(context.machineId).projectChat,
+  );
+  await context.navigate(
+    destination ?? { machineId: context.machineId, view: "navigation" },
+    { history: "replace" },
+  );
+  setStatus(context, { kind: "idle" });
+}
+
+/** The \u2042 button: open Casual from a project, or return to the project chat from Casual. */
 export function openCasualFromButton(context: OpenContext | undefined): void {
   const selectedMachine = selectionService?.getSnapshot().selectedMachine?.id;
   const current =
     context !== undefined && (selectedMachine === undefined || context.machineId === selectedMachine)
       ? context
       : undefined;
+
+  if (casualSide() === "casual") {
+    // In the separate window we opened, leaving means closing it: the browser
+    // returns focus to the tab that opened it, which is the project chat.
+    const ownWindow = inOwnCasualWindow() && current !== undefined;
+    if (ownWindow) {
+      window.close();
+      window.setTimeout(() => {
+        if (!window.closed) void backToProjectChat(current);
+      }, 0);
+      return;
+    }
+    if (current !== undefined) {
+      void backToProjectChat(current);
+      return;
+    }
+    // The panel has not rendered in this page load, so there is no navigate yet.
+    // Mount the tab and let doOpenCasual perform the return once it has one.
+    returnIntentAt = Date.now();
+    if (!clickCasualTab()) {
+      returnIntentAt = 0;
+      console.warn("[pi-web-casual] the Casual tab is not available yet");
+    }
+    return;
+  }
+
   if (current === undefined) {
-    if (!clickCasualTab()) console.warn("[pi-web-casual] the Casual tab is not available yet");
+    // \u2042 was clicked before the panel ever rendered, so there is no navigate
+    // yet. Ask the mount to open the chat once it has one.
+    openIntentAt = Date.now();
+    if (!clickCasualTab()) {
+      openIntentAt = 0;
+      console.warn("[pi-web-casual] the Casual tab is not available yet");
+    }
     return;
   }
   const status = getStatus(current.machineId);
   if (status.kind === "setup" || status.kind === "error") {
+    // Show the card so the user can act on the problem instead of retrying blind.
     if (!clickCasualTab()) void openCasual(current);
     return;
   }
-  void openCasual(current);
+  // Leave the project chat exactly where it is and put Casual beside it.
+  void openCasualInOwnTab(current);
+}
+
+/** True when this document runs inside the separate window Casual opened. */
+function inOwnCasualWindow(): boolean {
+  try {
+    return window.name === CASUAL_WINDOW_NAME;
+  } catch {
+    return false;
+  }
+}
+
+function openCasualWindow(): Window | null {
+  try {
+    return window.open("", CASUAL_WINDOW_NAME);
+  } catch (error) {
+    console.warn("[pi-web-casual] could not open a separate window", error);
+    return null;
+  }
+}
+
+interface CasualTarget {
+  readonly project: PluginProject;
+  readonly workspace?: CatalogWorkspace;
+  readonly session?: CasualSession;
+}
+
+async function resolveCasualTarget(context: OpenContext): Promise<CasualTarget | undefined> {
+  const project = await resolveProject(context);
+  if (project === undefined) return undefined;
+  const record = readRecord(context.machineId);
+  const discovered = await discover(context, project, record);
+  const workspace = discovered.workspace ?? workspaceFromRecord(project, record);
+  const session =
+    discovered.session ?? (discovered.authoritative ? undefined : sessionFromRecord(record));
+  return {
+    project,
+    ...(workspace === undefined ? {} : { workspace }),
+    ...(session === undefined ? {} : { session }),
+  };
+}
+
+/** Route URL for the remembered casual chat, used by the panel's embedded surface. */
+export function casualChatSrc(context: OpenContext): string | undefined {
+  const record = readRecord(context.machineId);
+  if (record.projectId === undefined || record.sessionId === undefined) return undefined;
+  return casualChatUrl(context.machineId, record.projectId, record.workspaceId, record.sessionId);
+}
+
+const pointerRefreshes = new Map<string, string>();
+
+/**
+ * Keep the remembered pointer in step with the newest live casual session
+ * without navigating, so the embedded chat opens the same conversation that
+ * Open chat would. The key guard stops a patch/render loop.
+ */
+export async function refreshCasualPointer(context: OpenContext): Promise<void> {
+  const record = readRecord(context.machineId);
+  if (record.sessionId === undefined) return;
+  const key = `${record.projectId ?? ""}\u0000${record.workspaceId ?? ""}\u0000${record.sessionId}`;
+  if (pointerRefreshes.get(context.machineId) === key) return;
+  pointerRefreshes.set(context.machineId, key);
+
+  const target = await resolveCasualTarget(context);
+  if (target?.session === undefined) return;
+  const latest = readRecord(context.machineId);
+  const unchanged =
+    latest.projectId === target.project.id &&
+    latest.workspaceId === target.workspace?.id &&
+    latest.sessionId === target.session.id;
+  if (unchanged) return;
+  rememberLocation(context, target.project, target.workspace);
+  rememberSession(context, target.session);
+  context.requestRender?.();
+}
+
+/**
+ * Open Casual in its own browser tab, or focus the one already open, so the
+ * project chat in this tab stays untouched. The window is created synchronously
+ * before any await because a popup blocker only allows it inside the gesture.
+ */
+export async function openCasualInOwnTab(context: OpenContext): Promise<void> {
+  const handle = openCasualWindow();
+  const target = await resolveCasualTarget(context);
+  const session = target?.session;
+  if (handle === null || target === undefined || session === undefined) {
+    // Nothing to point a separate window at yet (first run, or no session in
+    // the home): let the normal flow create it here instead.
+    if (handle !== null) handle.close();
+    await openCasual(context);
+    return;
+  }
+  handle.location.replace(
+    casualChatUrl(context.machineId, target.project.id, target.workspace?.id, session.id),
+  );
+  handle.focus();
 }
 
 async function doOpenCasual(context: OpenContext): Promise<void> {
+  if (Date.now() - returnIntentAt < 5000) {
+    returnIntentAt = 0;
+    await backToProjectChat(context);
+    return;
+  }
+  captureProjectChatPoint(context);
   setStatus(context, { kind: "opening", message: "Finding your casual conversation\u2026" });
   try {
     if (chooserMachines.delete(context.machineId)) {
@@ -289,6 +520,7 @@ async function doOpenCasual(context: OpenContext): Promise<void> {
 }
 
 async function doNewCasualChat(context: OpenContext): Promise<void> {
+  captureProjectChatPoint(context);
   setStatus(context, { kind: "opening", message: "Starting a fresh casual chat\u2026" });
   try {
     if (chooserMachines.delete(context.machineId)) {
