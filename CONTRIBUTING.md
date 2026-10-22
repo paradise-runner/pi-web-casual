@@ -84,4 +84,14 @@ The hidden project row and the embedded frame's chrome trimming live in PI WEB's
 
 ## Releases
 
-Maintainers publish manually through the **Publish to npm** GitHub Actions workflow. It requires an `NPM_TOKEN` repository secret. The workflow defaults to a dry run; choose the publish input to publish for real. The package is public and uses npm provenance.
+Releases are automated by [release-please](https://github.com/googleapis/release-please). `CHANGELOG.md` is generated from commit messages, so **write Conventional Commits** (`feat:`, `fix:`, `docs:`, `chore:` …). A `feat` bumps the minor version, a `fix` the patch version; anything else produces no release.
+
+1. Push to `main`. release-please keeps a **chore: release** pull request open with the version bump and changelog entry.
+2. Merge that pull request when you want to ship. release-please tags `v<version>` and creates the GitHub release.
+3. The same workflow then publishes that tag to npm with provenance, so there is no separate publish step and no `NPM_TOKEN` secret.
+
+Version numbers live in `package.json` and `.release-please-manifest.json`; do not edit them or `CHANGELOG.md` release headings by hand. `dist/` needs no rebuild for a release because the bundle carries no version string.
+
+npm publishing uses [trusted publishing](https://docs.npmjs.com/trusted-publishers/) (OIDC), configured once on npmjs.com under the package's **Trusted Publisher** settings: repository `paradise-runner/pi-web-casual`, workflow `release.yml`. Trusted publishing cannot create a package, so the first version was published manually; if it never was, run `npm publish --access public` once before relying on automation.
+
+To publish outside CI (only when the workflow is unavailable), run `npm publish --access public` from a clean checkout; you will need your own 2FA and no provenance attestation is produced.
