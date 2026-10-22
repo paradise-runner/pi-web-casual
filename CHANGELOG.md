@@ -16,6 +16,14 @@
 - **The Casual tab is its own view.** Clicking it renders the Casual card and leaves you there; it no longer redirects into the chat. The conversation opens from **Open chat** on the card, **⁂**, or the palette, and the card now shows the remembered session's name and location instead of a generic greeting. Mount-time auto-open is gone (`shouldAutoOpenOnMount` and the tab-click intent listener are removed); only an explicit control sets a short-lived open intent.
 - Documentation is now organized by reader: `README.md` for install, first run, task table, limits, and a decisions index; `docs/using-casual.md` for the user path; `docs/how-it-works.md` for internals; `GLOSSARY.md` and `docs/adr/` for vocabulary and decisions.
 
+## [0.2.0](https://github.com/paradise-runner/pi-web-casual/compare/v0.1.0...v0.2.0) (2026-10-22)
+
+
+### Features
+
+* remove the header ⁂ button now that the tab carries the chat ([3bdb35b](https://github.com/paradise-runner/pi-web-casual/commit/3bdb35be7fb85ddee038e80e0284b9243d011cdc))
+* separate the casual chat from project chats ([7518621](https://github.com/paradise-runner/pi-web-casual/commit/751862188d84f8913176961966a5100ec55abc10))
+
 ## 0.1.0 — 2026-10-21
 
 Initial public release.
