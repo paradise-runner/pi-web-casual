@@ -1,5 +1,7 @@
 # Casual opens in its own browser tab
 
+> Partially superseded by [ADR 0009](0009-the-tab-replaces-the-header-button.md): the separate window remains, but the palette opens it and it no longer responds to a header button.
+
 Navigating in place means Casual and the project chat trade places: opening one hides the other, and the Casual card disappears as soon as the chat loads. That is what "still redirects to chat" meant in practice. PI WEB's plugin API exposes no chat component that a panel could embed, so a split view is not available to a plugin. A separate browser window is: the plugin opens `window.open("", "pi-web-casual-chat")` inside the click gesture, points it at the ordinary `project`/`workspace`/`session`/`view=chat` route, and leaves the current tab alone. The Casual tab therefore stays a card instead of a redirect, and **Open chat** remains available for people who prefer one tab.
 
 ## Consequences

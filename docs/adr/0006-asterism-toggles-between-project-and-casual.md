@@ -1,5 +1,7 @@
 # The Asterism toggles between the project chat and Casual
 
+> Superseded by [ADR 0009](0009-the-tab-replaces-the-header-button.md): the header button and its return-point toggle were removed once the Casual tab carried the chat.
+
 Casual is a real PI WEB project, so opening it necessarily replaces the project selection. Users lost their place in the project chat and had to find the project again before continuing, and the plugin offered no control that expressed "the other side". A second button or a segmented control would add another best-effort shadow-DOM surface with its own breakage. Instead the existing **⁂** button became a two-sided toggle: from a project chat it opens Casual, and from Casual it returns to the project, workspace, and session that were selected when Casual last opened. The project side is captured as a return point and stored per machine next to the casual pointer.
 
 ## Consequences

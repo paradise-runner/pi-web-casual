@@ -1,7 +1,6 @@
 import type { TemplateResult } from "lit";
 import type { ApplicationPanelContext, PluginProject } from "@jmfederico/pi-web/plugin-api";
 import {
-  captureProjectChatPoint,
   casualChatSrc,
   changeCasualHome,
   chooseProject,
@@ -12,8 +11,6 @@ import {
   panelOpenContext,
   refreshCasualPointer,
   resetCasualLink,
-  setLatestPanelContext,
-  takeOpenIntent,
   type CasualStatus,
   type OpenContext,
 } from "./casual.js";
@@ -90,13 +87,6 @@ const projectButtonStyle = [
 
 export function renderPanel(html: HtmlTag, context: ApplicationPanelContext): TemplateResult {
   const open = panelOpenContext(context);
-  setLatestPanelContext(open);
-  // Visiting the tab is the last moment the project chat is still selected, so
-  // the toggle's return point is refreshed here, not only during open.
-  captureProjectChatPoint(open);
-  // An explicit request (⁂ with no panel yet) opens the chat; the tab itself
-  // always renders the card so Casual stays a view of its own.
-  if (takeOpenIntent()) queueMicrotask(() => void openCasual(open));
   const status = getStatus(context.machine.id);
   const record = readRecord(context.machine.id);
   const sessionLabel =

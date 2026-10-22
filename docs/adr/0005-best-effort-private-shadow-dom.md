@@ -1,5 +1,7 @@
 # Best-effort private shadow-DOM integration
 
+> The header-button part of this decision was removed in [ADR 0009](0009-the-tab-replaces-the-header-button.md). The hidden project row and the embedded frame's chrome trimming still apply.
+
 Casual needs two surfaces PI WEB does not expose: a **⁂** button beside **Actions** and a hidden `Casual` project row. Neither has a public contribution point, so both are done against PI WEB's private shadow DOM, isolated in `src/browser/dom.ts`, guarded so nothing is injected twice, and treated as optional.
 
 ## Consequences

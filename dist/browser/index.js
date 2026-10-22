@@ -1,4 +1,4 @@
-import { casualButtonLabels, changeCasualHome, getLatestPanelContext, newCasualChat, openCasual, openCasualFromButton, openCasualInOwnTab, resetCasualLink, runtimeOpenContext, setSelectionService, } from "./casual.js";
+import { changeCasualHome, newCasualChat, openCasual, openCasualInOwnTab, resetCasualLink, runtimeOpenContext, setSelectionService, } from "./casual.js";
 import { startCasualHostBridge } from "./dom.js";
 import { renderPanel } from "./panel.js";
 const plugin = {
@@ -6,7 +6,7 @@ const plugin = {
     name: "PI WEB Casual",
     activate: (context) => {
         setSelectionService(context.selection);
-        startCasualHostBridge(() => openCasualFromButton(getLatestPanelContext()), context.lifetimeSignal, casualButtonLabels);
+        startCasualHostBridge(context.lifetimeSignal);
         const actions = [
             {
                 id: "open",

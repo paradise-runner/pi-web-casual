@@ -5,12 +5,9 @@ import type {
   PluginActivationContext,
 } from "@jmfederico/pi-web/plugin-api";
 import {
-  casualButtonLabels,
   changeCasualHome,
-  getLatestPanelContext,
   newCasualChat,
   openCasual,
-  openCasualFromButton,
   openCasualInOwnTab,
   resetCasualLink,
   runtimeOpenContext,
@@ -24,11 +21,7 @@ const plugin: PiWebPlugin = {
   name: "PI WEB Casual",
   activate: (context: PluginActivationContext) => {
     setSelectionService(context.selection);
-    startCasualHostBridge(
-      () => openCasualFromButton(getLatestPanelContext()),
-      context.lifetimeSignal,
-      casualButtonLabels,
-    );
+    startCasualHostBridge(context.lifetimeSignal);
 
     const actions: PluginAction[] = [
       {

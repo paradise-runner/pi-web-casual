@@ -19,20 +19,12 @@ The remembered project, workspace, and session in `localStorage` under `pi-web-c
 _Avoid_: config, state, cache
 
 **Card**:
-The content of the Casual tab and its only view: it reports status and carries **Open chat**, **New chat**, **Reset link**, and **Change home**. The tab never redirects out of it.
+What the Casual tab shows when it has something to report instead of a chat: first run, setup, or an error. It carries **Open chat**, **Open Actions**, and the recovery controls.
 _Avoid_: panel UI, widget, sidebar
 
 **Entry point**:
-One of the ways into the chat: the ⁂ button, **Open chat** on the card, the action palette. The Casual tab itself is not one.
+One of the ways into the chat: the Casual tab, or a palette action.
 _Avoid_: launcher, shortcut
-
-**Project chat**:
-The conversation on the other side of the toggle: whichever project, workspace, and session was selected when Casual last opened. Not a Casual concept the plugin stores beyond that point.
-_Avoid_: normal chat, main chat
-
-**Return point**:
-The project, workspace, and session captured when Casual opens, stored per machine, used by the toggle in the current tab (and as a fallback inside the Casual window) to come back.
-_Avoid_: bookmark, resume, last session
 
 ### Operations
 
@@ -40,12 +32,8 @@ _Avoid_: bookmark, resume, last session
 Resolve the home, discover its workspaces and sessions, remember the chosen session, and navigate to it.
 _Avoid_: launch, load, restore
 
-**Toggle**:
-The ⁂ button's two-sided action: open Casual in its own window from a project chat, or return to your project chat from Casual — by closing that window when Casual opened it, otherwise by navigating. **Open chat** and the palette action only ever open; the tab never navigates.
-_Avoid_: switch, swap, flip
-
 **Casual window**:
-The separate browser tab Casual opens by name (`pi-web-casual-chat`) so a project chat stays visible. Later presses focus it instead of stacking tabs, and **⁂** inside it closes it.
+The separate browser tab opened from the palette by name (`pi-web-casual-chat`), so Casual can sit beside a project chat. Opening it again focuses that window instead of stacking tabs.
 _Avoid_: popup, side panel, split view
 
 **Embedded chat**:
@@ -75,9 +63,5 @@ The `Casual` row filtered out of the **Projects** sidebar, including the project
 _Avoid_: deleted project, orphan project
 
 **Best-effort chrome**:
-Plugin UI that relies on PI WEB's private shadow DOM rather than a public contribution point: the ⁂ button and the hidden row.
+Plugin behavior that relies on PI WEB's private shadow DOM rather than a public contribution point: the hidden project row and the embedded frame's chrome trimming.
 _Avoid_: hack, monkey patch
-
-**Explicit-open intent**:
-The short-lived flag set by an explicit control (⁂, **Open chat**, the palette) when the panel has not rendered yet, so the mount can open or return once it has a navigation context. A Casual tab click never sets it.
-_Avoid_: auto-open, redirect, hijack check

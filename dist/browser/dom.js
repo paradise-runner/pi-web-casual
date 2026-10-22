@@ -1,4 +1,3 @@
-const BUTTON_ATTR = "data-pi-web-casual-button";
 const HIDDEN_PROJECT_ATTR = "data-pi-web-casual-hidden";
 const EMBED_STYLE_ATTR = "data-pi-web-casual-embed";
 /** Window name of the frame the Casual panel embeds, so the plugin stays quiet inside it. */
@@ -9,6 +8,10 @@ const EMBED_CHROME = [
     "workspace-panel",
     "app-mobile-main-tabs",
 ];
+/** True when this document is the embedded frame the Casual panel renders. */
+export function isEmbeddedFrame() {
+    return window.name === EMBED_FRAME_NAME;
+}
 const CASUAL_PROJECT_PATH = /[\\/]\.casual-pi-web$/i;
 const HOST_TAGS = [
     "app-context-bar",
@@ -41,47 +44,6 @@ export function knownShadowRoots() {
         }
     }
     return roots;
-}
-function makeButton(kind, onOpen, labels) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.setAttribute(BUTTON_ATTR, kind);
-    button.title = labels.title;
-    button.setAttribute("aria-label", labels.aria);
-    button.textContent = "\u2042";
-    if (kind === "mobile") {
-        // Reuse the context-bar button rules from the host shadow root.
-        button.className = "context-action-button";
-        button.style.fontSize = "17px";
-        button.style.lineHeight = "1";
-        button.style.fontWeight = "600";
-    }
-    else {
-        button.style.cssText = [
-            "font: inherit",
-            "font-size: 18px",
-            "line-height: 1",
-            "padding: 4px 8px",
-            "border: 1px solid var(--pi-border)",
-            "border-radius: 7px",
-            "background: var(--pi-surface)",
-            "color: var(--pi-text)",
-            "cursor: pointer",
-        ].join(";");
-    }
-    button.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        onOpen();
-    });
-    return button;
-}
-function applyLabels(button, labels) {
-    if (button.title !== labels.title)
-        button.title = labels.title;
-    if (button.getAttribute("aria-label") !== labels.aria) {
-        button.setAttribute("aria-label", labels.aria);
-    }
 }
 function isCasualProjectRow(row) {
     const path = row.getAttribute("title") ?? "";
@@ -128,54 +90,26 @@ function hideCasualProjectRows(root) {
     }
 }
 /**
- * Add the \u2042 button next to the lightning Actions control in both the
- * desktop header and the mobile context bar, and hide the default Casual
- * project from the sidebar. PI WEB has no supported contribution points for
- * either surface, so this is deliberately best-effort and isolated here; a
- * page update may change the selectors.
- *
- * `labels` is re-read on every pass so the button describes what the next click
- * will do: open Casual from a project, or return to the project chat from
- * Casual.
+ * Hide the default Casual project from the sidebar so Casual stays out of the
+ * project list. PI WEB has no contribution point for this, so it is
+ * deliberately best-effort and isolated here; a page update may change the
+ * markup. The Casual tab and the palette actions are the supported surfaces and
+ * keep working either way.
  */
-export function startCasualHostBridge(onOpen, signal, labels) {
-    // Inside the panel's embedded frame the surrounding chrome is trimmed, and a
-    // second \u2042 button or sidebar filter there would fight the surface around it.
+export function startCasualHostBridge(signal) {
+    // Inside the panel's embedded frame the sidebar is hidden anyway, and
+    // rewriting it there would fight the surface around it.
     if (isEmbeddedFrame())
         return;
     const ensure = () => {
         if (signal.aborted)
             return;
         try {
-            const current = labels();
-            for (const root of knownShadowRoots()) {
+            for (const root of knownShadowRoots())
                 hideCasualProjectRows(root);
-                for (const actions of root.querySelectorAll(".context-actions")) {
-                    const existing = actions.querySelector(`[${BUTTON_ATTR}]`);
-                    if (existing !== null) {
-                        applyLabels(existing, current);
-                        continue;
-                    }
-                    const lightning = actions.querySelector('button[aria-label="Show Actions"]');
-                    if (lightning === null)
-                        continue;
-                    actions.insertBefore(makeButton("mobile", onOpen, current), lightning);
-                }
-                for (const actions of root.querySelectorAll(".header-actions")) {
-                    const existing = actions.querySelector(`[${BUTTON_ATTR}]`);
-                    if (existing !== null) {
-                        applyLabels(existing, current);
-                        continue;
-                    }
-                    const anchor = Array.from(actions.querySelectorAll("button")).find((button) => (button.textContent ?? "").trim() === "Actions");
-                    if (anchor === undefined)
-                        continue;
-                    actions.insertBefore(makeButton("header", onOpen, current), anchor);
-                }
-            }
         }
         catch (error) {
-            console.warn("[pi-web-casual] could not add the \u2042 button", error);
+            console.warn("[pi-web-casual] could not hide the casual project row", error);
         }
     };
     ensure();
@@ -183,8 +117,6 @@ export function startCasualHostBridge(onOpen, signal, labels) {
     signal.addEventListener("abort", () => {
         window.clearInterval(interval);
         for (const root of knownShadowRoots()) {
-            for (const element of root.querySelectorAll(`[${BUTTON_ATTR}]`))
-                element.remove();
             for (const row of root.querySelectorAll(`[${HIDDEN_PROJECT_ATTR}]`)) {
                 restoreProjectRow(row);
             }
@@ -194,10 +126,6 @@ export function startCasualHostBridge(onOpen, signal, labels) {
                 count.textContent = String(rows.length);
         }
     }, { once: true });
-}
-/** True when this document is the embedded frame the Casual panel renders. */
-export function isEmbeddedFrame() {
-    return window.name === EMBED_FRAME_NAME;
 }
 /**
  * Turn a same-origin PI WEB frame into a chat-only surface and keep it that way.

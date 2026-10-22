@@ -2,9 +2,11 @@
 
 A PI WEB plugin that adds one long-running conversation that is not attached to a repository.
 
-**Status:** implemented (v1). Browser-only plugin: one project-free chat, opened and toggled from the ⁂ button, the Casual tab, or the action palette. It has no server entry and needs no session-daemon restart.
+**Status:** implemented (v1). Browser-only plugin: one project-free chat, opened from the Casual tab or the action palette. It has no server entry and needs no session-daemon restart.
 
-![Casual on desktop: a ⁂ button beside Actions, a Casual tab, a native chat, and a sidebar with the Casual project hidden](docs/assets/desktop.png)
+![Casual on desktop: the Casual tab, a native chat, and a sidebar with the Casual project hidden](docs/assets/desktop.png)
+
+<sub>The screenshots predate this change: the ⁂ button they show beside **Actions** has been removed.</sub>
 
 ## What Casual does
 
@@ -14,19 +16,17 @@ The chat is PI WEB's **native chat**, not a plugin reimplementation. Streaming, 
 
 It contributes:
 
-- a **⁂** button beside the **Actions** control in the desktop header and the mobile context bar;
 - a **Casual** application tab;
 - four palette actions: **Open Casual Chat**, **Open Casual Chat in Its Own Tab**, **New Casual Chat**, **Set Up Casual Chat**.
 
 It behaves like this:
 
 - **One conversation.** The **Casual** tab and **Open Casual Chat** reopen the remembered session from any project.
-- **⁂ opens Casual beside your project chat.** From a project chat, **⁂** puts the casual conversation in its own browser tab or focuses the one already open, leaving the project chat exactly where it is. In that separate window the button reads **Back to your project chat** and closing it returns you there.
 - **The Casual tab is only a chat.** The tab embeds the real PI WEB chat in a same-origin frame with that frame's navigation, header, and workspace column trimmed away, so a project chat in the main column keeps working next to it. There is no toolbar and no card around it; every control lives in the palette.
 - **Hidden home.** The `Casual` project is filtered out of the **Projects** sidebar, including its row, the project count, and the collapsed-heading summary. It remains a real project for PI WEB: it appears in the **Change home** chooser, and its sessions appear in **Sessions** while it is selected.
 - **New chat keeps history.** **New Casual Chat** creates another session in the same home and makes it the remembered one. The previous conversation stays in **Sessions**; Casual never deletes.
 - **Self-repair.** Opening Casual resolves the home's workspaces and sessions and prefers the remembered session, so a stale or archived pointer is replaced by the newest live casual session instead of failing.
-- **Automatic first run.** The first **Open chat**, **⁂**, or palette open creates and trusts `~/.casual-pi-web`, starts a session, and reloads the page once into it. There is no **Add Project** step.
+- **Automatic first run.** The first **Open chat** or palette open creates and trusts `~/.casual-pi-web`, starts a session, and reloads the page once into it. There is no **Add Project** step.
 
 ## Install
 
@@ -57,7 +57,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md#development-setup). PI WEB does not compil
 
 ## First run
 
-1. Click **⁂**, **Open chat** on the **Casual** tab card, or **Actions → Casual → Open Casual Chat**.
+1. Open the **Casual** tab, or **Actions → Casual → Open Casual Chat**.
 2. Casual creates and trusts `~/.casual-pi-web`, starts the first session, and reloads the page once into the chat.
 3. Type in the normal composer.
 
@@ -65,15 +65,14 @@ The reload is one-time. PI WEB has no plugin API for registering a project, so C
 
 If those requests are unreachable, the panel shows a setup card instead: add `~/.casual-pi-web` yourself through **Add Project**, or choose an already-registered project as the home.
 
-![Casual on mobile: the ⁂ button next to the lightning Actions button, the Casual tab in the mobile tab bar, and a native chat](docs/assets/mobile.png)
+![Casual on mobile: the Casual tab in the mobile tab bar and a native chat](docs/assets/mobile.png)
 
 ## Use
 
 | Task | Where |
 | --- | --- |
 | Chat casually next to your project | The **Casual** tab — it embeds the chat and leaves the project column alone |
-| Keep a project chat and Casual open as separate tabs | **⁂** from a project chat, **Open in its own tab** on the Casual card, or **Actions → Casual → Open Casual Chat in Its Own Tab** |
-| Return from the separate window | Close it, or press **⁂** |
+| Keep a project chat and Casual open as separate tabs | **Actions → Casual → Open Casual Chat in Its Own Tab** |
 | Open the conversation in this tab, full view | **Open chat** on the Casual card, or **Actions → Casual → Open Casual Chat** |
 | Start a new conversation | **Actions → Casual → New Casual Chat**, or **New chat** on the Casual card |
 | Recover a stale link | **Reset link** on the Casual card |
@@ -81,22 +80,19 @@ If those requests are unreachable, the panel shows a setup card instead: add `~/
 
 The **Casual** tab never redirects you into the host chat view. It shows the card, and once a conversation is remembered it embeds that conversation directly. Setup and error states keep their own card with the controls needed to recover.
 
-The **Casual** tab is a view of its own: it always shows the card and never redirects you into the chat. Nothing opens the conversation except **Open chat**, **Open in its own tab**, **⁂**, or the palette. The card reports where you left off — the remembered session's name and location — and carries the controls that only make sense there.
+The **Casual** tab is a view of its own: it always shows the card and never redirects you into the chat. Nothing opens the conversation except **Open chat** on the card or a palette action. The card reports where you left off — the remembered session's name and location — and carries the controls that only make sense there.
 
 While the conversation is open, the **Casual** project is the selected project, so its sessions are visible in **Sessions** like any other project's.
 
 ## Limits (v1)
 
 - **One conversation.** No topics, folders, pins, or per-topic sessions. A new chat is a sibling session in the same home, not a new space.
-- **The toggle has two stored sides, per machine.** Returning to your project chat restores the exact project, workspace, and session that was selected when Casual last opened. Nothing crosses machines, and a removed or emptied project makes the toggle open the Projects list instead.
-- **Before the first Casual visit there is no project side.** Pressing **⁂** with nothing selected opens the Projects list rather than inventing a destination.
-- **The separate window is a browser tab, not a split view.** PI WEB's plugin API exposes no chat component a panel could embed, so two chats side by side means two browser tabs. The window is opened by script and reused by name; a popup blocker, or no casual session yet, makes **⁂** fall back to opening the conversation in the current tab.
+- **The separate window is a browser tab.** The palette action opens a named window and reuses it; a popup blocker, or no casual session yet, falls back to opening the conversation in the current tab, and the window is closed like any other tab.
 - **One home per machine.** The home folder is fixed at `~/.casual-pi-web` unless you run **Change home**, and the remembered project/workspace/session pointer is stored per machine in `localStorage` under `pi-web-casual:store:v2`. A second machine finds or creates its own casual session.
 - **No settings pane.** PI WEB's plugin API has no Settings contribution, so the home folder and pointer are changed through the card's controls, not through configuration.
 - **Controls live in the palette.** Once a conversation is remembered the Casual tab has no buttons at all, so **Open**, **Open in Its Own Tab**, **New**, **Reset Casual Link**, **Change Casual Home**, and **Set Up** are palette actions. The card's buttons appear only in the states that show the card.
-- **The toggle reads selection, not history.** The button decides which side you are on from the selected project. If the host has not reported a machine and project, it behaves as plain *open Casual*.
 - **The embedded chat is framed, not native to the panel.** PI WEB's plugin API exposes no transcript component, so the Casual tab embeds the app's chat route in a same-origin frame and hides that frame's chrome. The frame is supervised, not trimmed once: it boots its own SPA, so the chrome keeps being hidden as the frame renders. A frame is also a second client instance with its own daemon connection.
-- **Best-effort chrome.** PI WEB has no contribution point for a header button, a hidden project row, or a chat-only layout, so the ⁂ button, the hidden row, and the embedded frame's chrome trimming depend on PI WEB's private shadow DOM. If an update changes that markup, the Casual tab and the palette keep working and the selectors need work in [`src/browser/dom.ts`](src/browser/dom.ts).
+- **Best-effort chrome.** PI WEB has no contribution point for hiding a project row or for a chat-only layout, so the hidden row and the embedded frame's chrome trimming depend on PI WEB's private shadow DOM. If an update changes that markup, the Casual tab and the palette keep working and the selectors need work in [`src/browser/dom.ts`](src/browser/dom.ts).
 - **Project registration is not public API.** First run uses the host's own endpoints. If PI WEB changes them, first run falls back to the setup card.
 - **API v4 only.** PI WEB `1.202610.6+` logs a deprecation warning for every API-v4 plugin, including its own bundled plugins. Moving to API v5 would drop `1.202610.3` support.
 - **No deletion.** Casual does not delete sessions, workspaces, or the home project. Manage history in **Sessions**.
@@ -108,7 +104,7 @@ A browser-only PI WEB plugin package. There is no server entry, no Pi extension,
 
 - Browser bundle in `dist/browser`, served by PI WEB directly from the installed package.
 - Browser API v4, with the public **catalog** used on `1.202610.6+` and the selection service on `1.202610.3`.
-- Per-machine pointer in `localStorage` (`pi-web-casual:store:v2`), holding the casual side and the project-side return point.
+- Per-machine pointer in `localStorage` (`pi-web-casual:store:v2`), holding the casual project, workspace, and session.
 - Shadow-DOM integration isolated in `src/browser/dom.ts`.
 
 | Change | Action |
@@ -143,9 +139,10 @@ Issues and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.
 - [ADR 0003: Browser-only, with first-run bootstrap through host endpoints](docs/adr/0003-browser-only-bootstrap-through-host-endpoints.md)
 - [ADR 0004: Stay on browser plugin API v4](docs/adr/0004-stay-on-browser-plugin-api-v4.md)
 - [ADR 0005: Best-effort private shadow-DOM integration](docs/adr/0005-best-effort-private-shadow-dom.md)
-- [ADR 0006: The Asterism toggles between the project chat and Casual](docs/adr/0006-asterism-toggles-between-project-and-casual.md)
+- [ADR 0006: The Asterism toggles between the project chat and Casual](docs/adr/0006-asterism-toggles-between-project-and-casual.md) *(superseded)*
 - [ADR 0007: Casual opens in its own browser tab](docs/adr/0007-casual-opens-in-its-own-window.md)
 - [ADR 0008: The Casual panel embeds the chat in a same-origin frame](docs/adr/0008-panel-embeds-the-chat-in-a-same-origin-frame.md)
+- [ADR 0009: The Casual tab replaces the header button](docs/adr/0009-the-tab-replaces-the-header-button.md)
 - [Vocabulary](GLOSSARY.md)
 - [Using Casual](docs/using-casual.md)
 - [How Casual works](docs/how-it-works.md)

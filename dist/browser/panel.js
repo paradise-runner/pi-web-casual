@@ -1,4 +1,4 @@
-import { captureProjectChatPoint, casualChatSrc, changeCasualHome, chooseProject, getStatus, newCasualChat, openCasual, openCasualInOwnTab, panelOpenContext, refreshCasualPointer, resetCasualLink, setLatestPanelContext, takeOpenIntent, } from "./casual.js";
+import { casualChatSrc, changeCasualHome, chooseProject, getStatus, newCasualChat, openCasual, openCasualInOwnTab, panelOpenContext, refreshCasualPointer, resetCasualLink, } from "./casual.js";
 import { clickActionsButton, EMBED_FRAME_NAME, isEmbeddedFrame, superviseEmbeddedChat } from "./dom.js";
 import { readRecord } from "./store.js";
 const NO_CONVERSATION = "No conversation yet";
@@ -65,14 +65,6 @@ const projectButtonStyle = [
 ].join(";");
 export function renderPanel(html, context) {
     const open = panelOpenContext(context);
-    setLatestPanelContext(open);
-    // Visiting the tab is the last moment the project chat is still selected, so
-    // the toggle's return point is refreshed here, not only during open.
-    captureProjectChatPoint(open);
-    // An explicit request (⁂ with no panel yet) opens the chat; the tab itself
-    // always renders the card so Casual stays a view of its own.
-    if (takeOpenIntent())
-        queueMicrotask(() => void openCasual(open));
     const status = getStatus(context.machine.id);
     const record = readRecord(context.machine.id);
     const sessionLabel = record.sessionName ??

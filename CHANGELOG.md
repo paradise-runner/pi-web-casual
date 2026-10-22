@@ -12,6 +12,7 @@
 
 ### Changed
 
+- **Removed the header ⁂ button.** The Casual tab and the palette are the entry points now, so nothing is injected beside **Actions** on desktop or mobile. The button's toggle, the per-machine return point, and the close-on-⁂ behavior in the separate window are gone with it; the separate window stays as a palette action and behaves like any other tab.
 - **The Casual tab is its own view.** Clicking it renders the Casual card and leaves you there; it no longer redirects into the chat. The conversation opens from **Open chat** on the card, **⁂**, or the palette, and the card now shows the remembered session's name and location instead of a generic greeting. Mount-time auto-open is gone (`shouldAutoOpenOnMount` and the tab-click intent listener are removed); only an explicit control sets a short-lived open intent.
 - Documentation is now organized by reader: `README.md` for install, first run, task table, limits, and a decisions index; `docs/using-casual.md` for the user path; `docs/how-it-works.md` for internals; `GLOSSARY.md` and `docs/adr/` for vocabulary and decisions.
 

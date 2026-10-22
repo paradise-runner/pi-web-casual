@@ -4,7 +4,7 @@ This page is for contributors, maintainers, and anyone debugging Casual. For day
 
 ## Design in one paragraph
 
-Casual is a browser-only PI WEB plugin that adds a single long-running conversation outside any repository. It does not implement an agent client: the chat you see is PI WEB's native chat, which is why streaming, tools, images, model selection, and compaction behave exactly like everywhere else. The plugin's job is small and specific — create and hide a home project, remember a session for each side of the toggle, and give you one click between them.
+Casual is a browser-only PI WEB plugin that adds a single long-running conversation outside any repository. It does not implement an agent client: the chat you see is PI WEB's native chat, which is why streaming, tools, images, model selection, and compaction behave exactly like everywhere else. The plugin's job is small and specific — create and hide a home project, remember which session to show, and present that conversation in the Casual tab.
 
 ## What the plugin contributes
 
@@ -12,9 +12,8 @@ Casual is a browser-only PI WEB plugin that adds a single long-running conversat
 | --- | --- | --- |
 | **Casual** application panel (tab) | PI WEB tab bar, desktop and mobile | [`src/browser/index.ts`](../src/browser/index.ts), [`panel.ts`](../src/browser/panel.ts) |
 | Palette actions — *Open Casual Chat*, *Open Casual Chat in Its Own Tab*, *New Casual Chat*, *Set Up Casual Chat* | Actions palette, group "Casual" | [`src/browser/index.ts`](../src/browser/index.ts) |
-| Embedded chat | Casual tab, same-origin frame (`pi-web-casual-embed`) | [`src/browser/panel.ts`](../src/browser/panel.ts), [`dom.ts`](../src/browser/dom.ts) |
-| **⁂** button | Next to the lightning **Actions** control in the header and mobile context bar; toggles between the project chat and Casual | [`src/browser/dom.ts`](../src/browser/dom.ts), [`casual.ts`](../src/browser/casual.ts) |
 | Hidden project row | Sidebar **Projects** list | [`src/browser/dom.ts`](../src/browser/dom.ts) |
+| Embedded chat | Casual tab, same-origin frame | [`src/browser/panel.ts`](../src/browser/panel.ts) |
 
 Everything else is navigation into PI WEB's own screens.
 
@@ -58,16 +57,6 @@ The Casual tab is a view of its own: it always renders the card and never redire
 
 `takeOpenIntent` decides per mount. The \u2042 button sets an intent (open, or return) when the panel has never rendered in this page load, because navigation requires a panel context; the mount consumes it once within a 5 second window. A Casual tab click sets nothing, so the tab can be visited at any time — including while a project chat is open — without moving you.
 
-## The ⁂ toggle
-
-`openCasualFromButton` branches on `casualSide()`, which compares the selected project against the remembered home (by id, then by a `.casual-pi-web` path suffix):
-
-- **Project side** — `openCasualInOwnTab`, which opens a named window and points it at the casual chat URL; `captureProjectChatPoint` stores the selected project, workspace, and session in `record.projectChat` first.
-- **Casual side** — inside the window Casual opened, `window.close()` returns focus to the opener tab; otherwise `backToProjectChat` resolves the return point and navigates to it.
-- **Unknown side** — no machine or project reported; behaves as plain *open Casual*.
-
-The return point is validated through the catalog before navigating, so an archived session becomes the newest live session in that workspace and a project with no workspaces clears `projectChat` and opens the Projects list. Without a catalog (API v4 on `1.202610.3`) the remembered ids are used as-is and the host reports any route failure.
-
 ## The embedded chat
 
 The Casual tab is an application panel, and PI WEB exposes no transcript component, so the panel embeds one: an iframe pointed at `casualChatUrl(...)` with `name="pi-web-casual-embed"` ([`panel.ts`](../src/browser/panel.ts)).
@@ -77,30 +66,28 @@ The Casual tab is an application panel, and PI WEB exposes no transcript compone
 - The walk starts at the lowest common ancestor of `chat-view` and `prompt-editor`, and only siblings of that branch are hidden. The transcript's own ancestors are never touched, so this code cannot hide the chat — which is why there is no rollback path.
 - Supervision stops when the frame is disconnected or after five minutes, whichever comes first.
 - `refreshCasualPointer` resolves the home through the catalog and re-patches the casual fields without navigating, so the frame follows the newest live session and a stale pointer cannot embed a route the host rejects.
-- The frame runs a second PI WEB client. `startCasualHostBridge` returns early when `window.name` is the embed name, so the embedded app gets no ⁂ button and no sidebar filtering of its own.
+- The frame runs a second PI WEB client. `startCasualHostBridge` returns early when `window.name` is the embed name, so the embedded app gets no sidebar filtering of its own.
 - If the panel ever renders inside the embedded app, `isEmbeddedFrame()` makes it show the card instead of nesting another frame.
 
 ## The separate window
 
-`openCasualInOwnTab` exists because a panel frame is a framed chat, not a full PI WEB surface, and because some people want the conversation in a real window beside their project chat.
+`openCasualInOwnTab` backs the palette action of the same name.
 
-- `window.open("", "pi-web-casual-chat")` runs synchronously, before any `await`, because popup blockers only admit a window created inside the click gesture. The stable name means later presses focus the existing tab instead of stacking new ones.
+- `window.open("", "pi-web-casual-chat")` runs synchronously, before any `await`, because popup blockers only admit a window created inside the click gesture. The stable name means a second invocation focuses the existing tab instead of stacking new ones.
 - The target is resolved with the same `resolveProject`/`discover` path as opening in place, and the window is then pointed at `casualChatUrl(...)` — the same `project`/`workspace`/`session`/`view=chat` route the one-time bootstrap reload uses ([`bootstrap.ts`](../src/browser/bootstrap.ts)).
 - When there is no project, no session yet, or the window is blocked, the helper closes the blank window and falls back to `openCasual` in the current tab, so first run and session creation behave exactly as before.
-- `inOwnCasualWindow` compares `window.name`; that is how the button knows to close the window rather than navigate this tab back to the project chat. If the browser refuses to close it, a zero-delay check falls back to `backToProjectChat`.
+- It is an ordinary tab: no custom close behavior, because the header button no longer exists ([ADR 0009](adr/0009-the-tab-replaces-the-header-button.md)).
 
 `clickCasualTab` is still the last resort when the panel has never rendered in this page load, because navigation requires a context. That path sets `openIntentAt` (open) or `returnIntentAt` (return), mounts the tab, and lets `doOpenCasual` act as soon as it has a context — no reload, and only within a 5 second window. When the last attempt ended in a setup or error card, \u2042 only mounts the tab so the card can report the problem instead of retrying invisibly.
 
-Labels are not static: `casualButtonLabels` is passed to the shadow-DOM bridge, which re-reads it on each 500 ms pass and rewrites `title` and `aria-label` on the existing button, so the toggle always describes its next click.
-
 ## Shadow-DOM integrations
 
-PI WEB exposes no contribution points for a header button or for hiding a project row, so both are best-effort work on PI WEB's private shadow DOM, deliberately isolated in [`src/browser/dom.ts`](../src/browser/dom.ts):
+PI WEB exposes no contribution point for hiding a project row or for a chat-only layout, so both are best-effort work on PI WEB's private shadow DOM, deliberately isolated in [`src/browser/dom.ts`](../src/browser/dom.ts):
 
-- Host tags consulted: `app-context-bar`, `app-navigation-panel`, `workspace-panel`, `app-mobile-main-tabs`.
-- The **⁂** button is inserted before `button[aria-label="Show Actions"]` (mobile) or before the button labelled **Actions** (desktop). Marked with `data-pi-web-casual-button` so it is never injected twice.
+- Host tags consulted: `app-context-bar`, `app-navigation-panel`, `workspace-panel`, `app-mobile-main-tabs`, `status-bar`, `navigation`, `chat-view`, `prompt-editor`.
 - The Casual project row is hidden via `projects`/`selected` on the project-list component, so it also works when the section is collapsed. The `.section-count` text is rewritten to the visible project count.
-- If a PI WEB update changes markup, the **Casual** tab and the palette actions keep working. Update the selectors to restore the button and the hidden row.
+- The embedded frame's chrome is hidden by a supervised pass, described above.
+- If a PI WEB update changes markup, the **Casual** tab and the palette actions keep working. Update the selectors to restore the hidden row or the frame trimming.
 
 ## Compatibility
 
@@ -111,16 +98,16 @@ Browser API **v4**, so Casual runs on PI WEB `1.202610.3` and `1.202610.6+`. PI 
 | Path | Purpose |
 | --- | --- |
 | `src/browser/index.ts` | Activation, tab, actions |
-| `src/browser/casual.ts` | Project/workspace/session resolution, open/new flows, toggle, return point, separate window, explicit-open intent |
+| `src/browser/casual.ts` | Project/workspace/session resolution, open/new flows, separate window, embedded-chat source |
 | `src/browser/bootstrap.ts` | First-run project creation, trust, session creation, one-time reload |
 | `src/browser/panel.ts` | Casual panel UI and card |
-| `src/browser/dom.ts` | Host shadow-DOM bridge, toggle button and labels, hidden project row |
+| `src/browser/dom.ts` | Host shadow-DOM bridge, hidden project row, embedded-frame supervision |
 | `src/browser/store.ts` | Per-machine remembered state |
 | `src/browser/types.ts` | Optional catalog contract used on newer hosts |
 
 Generated `dist/browser` files are committed because PI WEB serves them directly from the installed package. CI verifies that the committed output matches source.
 
-Bootstrap, project registration, and the shadow-DOM surface each have a recorded decision: [ADR 0003](adr/0003-browser-only-bootstrap-through-host-endpoints.md), [ADR 0005](adr/0005-best-effort-private-shadow-dom.md). The chat surface and scope are covered by [ADR 0001](adr/0001-one-long-running-conversation.md) and [ADR 0002](adr/0002-native-chat-not-an-agent-client.md); version support by [ADR 0004](adr/0004-stay-on-browser-plugin-api-v4.md); the two-sided button by [ADR 0006](adr/0006-asterism-toggles-between-project-and-casual.md) and [ADR 0007](adr/0007-casual-opens-in-its-own-window.md).
+Bootstrap, project registration, and the shadow-DOM surface each have a recorded decision: [ADR 0003](adr/0003-browser-only-bootstrap-through-host-endpoints.md), [ADR 0005](adr/0005-best-effort-private-shadow-dom.md). The chat surface and scope are covered by [ADR 0001](adr/0001-one-long-running-conversation.md) and [ADR 0002](adr/0002-native-chat-not-an-agent-client.md); version support by [ADR 0004](adr/0004-stay-on-browser-plugin-api-v4.md); the separate window by [ADR 0007](adr/0007-casual-opens-in-its-own-window.md); the embedded chat by [ADR 0008](adr/0008-panel-embeds-the-chat-in-a-same-origin-frame.md); the removal of the header button by [ADR 0009](adr/0009-the-tab-replaces-the-header-button.md).
 
 ## Releasing
 

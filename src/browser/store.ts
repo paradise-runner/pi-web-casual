@@ -1,15 +1,5 @@
 const STORAGE_KEY = "pi-web-casual:store:v2";
 
-/** The project chat the \u2042 toggle returns to; captured when Casual opens. */
-export interface ProjectChatPoint {
-  projectId?: string;
-  projectPath?: string;
-  workspaceId?: string;
-  workspacePath?: string;
-  sessionId?: string;
-  sessionName?: string;
-}
-
 export interface CasualRecord {
   projectPath?: string;
   projectId?: string;
@@ -17,8 +7,6 @@ export interface CasualRecord {
   workspacePath?: string;
   sessionId?: string;
   sessionName?: string;
-  /** Kept separate from the casual fields so each side survives the other. */
-  projectChat?: ProjectChatPoint;
 }
 
 interface StoreShape {
