@@ -62,10 +62,16 @@ const smallButtonStyle = [
   "color:var(--pi-muted)",
   "cursor:pointer",
 ].join(";");
+// The host renders the panel inside a full-height column flex area, so the
+// frame has to claim that space instead of guessing a viewport offset: a fixed
+// `calc(100vh - Npx)` left dead space under the composer and made the embedded
+// chat look like it was floating.
 const frameStyle = [
   "box-sizing:border-box",
   "width:100%",
-  "height:max(420px,calc(100vh - 170px))",
+  "height:100%",
+  "min-height:0",
+  "flex:1 1 auto",
   "border:0",
   "background:var(--pi-bg)",
   "display:block",

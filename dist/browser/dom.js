@@ -139,6 +139,12 @@ export function startCasualHostBridge(signal) {
 const EMBED_STYLE_CSS = `
   app-context-bar, app-mobile-main-tabs, app-navigation-panel, workspace-panel,
   status-bar, navigation { display: none !important; }
+  /* Hiding the side panels leaves their grid tracks behind, so the chat stays
+     squeezed beside an empty navigation column. Collapse the shell to the main
+     column so the transcript and composer use the whole frame width. These
+     unlayered rules outrank the host's layered shell stylesheet. */
+  .shell { grid-template-columns: minmax(0, 1fr); }
+  main { grid-column: 1 / -1; }
   :host { background: var(--pi-bg); }
   chat-view { min-height: 0; }
 `;
