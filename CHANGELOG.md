@@ -15,6 +15,11 @@
 - **Removed the header ⁂ button.** The Casual tab and the palette are the entry points now, so nothing is injected beside **Actions** on desktop or mobile. The button's toggle, the per-machine return point, and the close-on-⁂ behavior in the separate window are gone with it; the separate window stays as a palette action and behaves like any other tab.
 - **The Casual tab is its own view.** Clicking it renders the Casual card and leaves you there; it no longer redirects into the chat. The conversation opens from **Open chat** on the card, **⁂**, or the palette, and the card now shows the remembered session's name and location instead of a generic greeting. Mount-time auto-open is gone (`shouldAutoOpenOnMount` and the tab-click intent listener are removed); only an explicit control sets a short-lived open intent.
 - Documentation is now organized by reader: `README.md` for install, first run, task table, limits, and a decisions index; `docs/using-casual.md` for the user path; `docs/how-it-works.md` for internals; `GLOSSARY.md` and `docs/adr/` for vocabulary and decisions.
+- **README screenshots are current.** The desktop image shows a project chat in the main column with the Casual conversation open beside it in the Casual tab, and the Casual project hidden from **Projects**; the mobile image shows the casual chat in PI WEB's mobile layout. Both replace the 0.1.0 captures that still showed the removed header **⁂** button.
+
+### Fixed
+
+- **Older hosts fail loudly instead of silently.** Activation now checks for PI WEB's browser selection service and throws `PI WEB Casual requires PI WEB 1.202610.3 or newer` when it is missing. PI WEB `1.202610.1` accepts the plugin's `apiVersion: 4` but has no application panels, selection service, or project discovery, so it used to install, report the plugin as active, and register palette actions that could never open a chat. PI WEB has no install-time host-version gate, so activation is the earliest enforceable point; the host reports the failure as `Failed to register PI WEB plugin pi-web-casual during activate` and registers no contributions.
 
 ## [0.2.0](https://github.com/paradise-runner/pi-web-casual/compare/v0.1.0...v0.2.0) (2026-10-22)
 

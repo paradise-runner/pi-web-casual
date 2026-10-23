@@ -4,9 +4,7 @@ A PI WEB plugin that adds one long-running conversation that is not attached to 
 
 **Status:** implemented (v1). Browser-only plugin: one project-free chat, opened from the Casual tab or the action palette. It has no server entry and needs no session-daemon restart.
 
-![Casual on desktop: the Casual tab, a native chat, and a sidebar with the Casual project hidden](docs/assets/desktop.png)
-
-<sub>The screenshots predate this change: the ⁂ button they show beside **Actions** has been removed.</sub>
+![Casual on desktop: a project chat in the main column and the Casual conversation open beside it in the Casual tab, with the Casual project hidden from the sidebar](docs/assets/desktop.png)
 
 ## What Casual does
 
@@ -35,6 +33,8 @@ It behaves like this:
 - PI WEB `1.202610.3` or newer (browser plugin API v4). Tested against `@jmfederico/pi-web` 1.202610.3.
 - Node.js 22.19 or newer only if you build from source. Installing the published package needs no toolchain.
 - No session-daemon restart at any point.
+
+PI WEB has no install-time version gate for plugins, so an older host installs the package and then refuses it at activation. The browser console shows `PI WEB Casual requires PI WEB 1.202610.3 or newer`, and no Casual tab is registered.
 
 ### From GitHub
 
@@ -65,7 +65,7 @@ The reload is one-time. PI WEB has no plugin API for registering a project, so C
 
 If those requests are unreachable, the panel shows a setup card instead: add `~/.casual-pi-web` yourself through **Add Project**, or choose an already-registered project as the home.
 
-![Casual on mobile: the Casual tab in the mobile tab bar and a native chat](docs/assets/mobile.png)
+![Casual on mobile: the casual conversation open in PI WEB's mobile chat layout, with Casual in the tab bar](docs/assets/mobile.png)
 
 ## Use
 
@@ -94,7 +94,7 @@ While the conversation is open, the **Casual** project is the selected project, 
 - **The embedded chat is framed, not native to the panel.** PI WEB's plugin API exposes no transcript component, so the Casual tab embeds the app's chat route in a same-origin frame and hides that frame's chrome. The frame is supervised, not trimmed once: it boots its own SPA, so the chrome keeps being hidden as the frame renders. A frame is also a second client instance with its own daemon connection.
 - **Best-effort chrome.** PI WEB has no contribution point for hiding a project row or for a chat-only layout, so the hidden row and the embedded frame's chrome trimming depend on PI WEB's private shadow DOM. If an update changes that markup, the Casual tab and the palette keep working and the selectors need work in [`src/browser/dom.ts`](src/browser/dom.ts).
 - **Project registration is not public API.** First run uses the host's own endpoints. If PI WEB changes them, first run falls back to the setup card.
-- **API v4 only.** PI WEB `1.202610.6+` logs a deprecation warning for every API-v4 plugin, including its own bundled plugins. Moving to API v5 would drop `1.202610.3` support.
+- **API v4 only, PI WEB `1.202610.3` or newer.** Older hosts accept the package but Casual refuses to activate, because they lack application panels, the selection service, and project discovery. PI WEB `1.202610.6+` logs a deprecation warning for every API-v4 plugin, including its own bundled plugins. Moving to API v5 would drop `1.202610.3` support.
 - **No deletion.** Casual does not delete sessions, workspaces, or the home project. Manage history in **Sessions**.
 - **No telemetry.** No analytics, no third-party calls, no server process. Messages go to the model provider you configured for PI WEB.
 
@@ -103,7 +103,7 @@ While the conversation is open, the **Casual** project is the selected project, 
 A browser-only PI WEB plugin package. There is no server entry, no Pi extension, and no agent client: the plugin resolves the home project, remembers a session for each side of the toggle, and navigates into PI WEB's native chat.
 
 - Browser bundle in `dist/browser`, served by PI WEB directly from the installed package.
-- Browser API v4, with the public **catalog** used on `1.202610.6+` and the selection service on `1.202610.3`.
+- Browser API v4, with the public **catalog** used on `1.202610.6+` and the selection service on `1.202610.3`; activation throws on hosts that lack the selection service.
 - Per-machine pointer in `localStorage` (`pi-web-casual:store:v2`), holding the casual project, workspace, and session.
 - Shadow-DOM integration isolated in `src/browser/dom.ts`.
 

@@ -81,6 +81,7 @@ Either way the new session becomes the one the tab embeds, and the previous conv
 
 | Situation | What to do |
 | --- | --- |
+| Casual never appears after install | PI WEB is older than `1.202610.3`. The browser console shows `PI WEB Casual requires PI WEB 1.202610.3 or newer`; update PI WEB, then reload the browser. |
 | The conversation seems gone | Open Casual again. It prefers the remembered session and otherwise takes the newest non-archived session in the home. |
 | The remembered session was archived or deleted | Same: opening Casual replaces the stale pointer with the newest live session. |
 | The card keeps showing an error | **Retry** once, then **Reset link**, then reopen. |

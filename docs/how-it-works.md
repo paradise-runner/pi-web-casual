@@ -93,6 +93,8 @@ PI WEB exposes no contribution point for hiding a project row or for a chat-only
 
 Browser API **v4**, so Casual runs on PI WEB `1.202610.3` and `1.202610.6+`. PI WEB `1.202610.6+` logs a deprecation warning for every API-v4 plugin, including its own bundled plugins; moving to API v5 would drop `1.202610.3` support. There is no server entry, no Pi extension, no analytics, and no third-party service.
 
+The floor is enforced at activation, not at install: PI WEB's manifest has no host-version field, so it is the earliest point the plugin runs. `activate` throws when the host does not expose the browser selection service, which also catches `1.202610.1` — that release accepts `apiVersion: 4` but has no application panels, selection service, or project discovery, so the tab could never render. The host reports the throw as `Failed to register PI WEB plugin pi-web-casual during activate`, and none of the palette actions are registered.
+
 ## Source layout
 
 | Path | Purpose |

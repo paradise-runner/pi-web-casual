@@ -16,10 +16,35 @@ import {
 import { startCasualHostBridge } from "./dom.js";
 import { renderPanel } from "./panel.js";
 
+/**
+ * Oldest PI WEB with the browser v4 surface Casual is built on: application
+ * panels, the selection service, and project discovery. `1.202610.1` also
+ * accepts `apiVersion: 4`, but exposes none of them.
+ */
+const MINIMUM_PI_WEB_VERSION = "1.202610.3";
+
+/**
+ * PI WEB has no install-time host-version gate for browser plugins, so the
+ * earliest loud failure is activation. Throwing here keeps an unsupported host
+ * from registering a half-working plugin (no tab, dead palette actions) and
+ * puts the reason in the host's "Failed to register PI WEB plugin ... during
+ * activate" diagnostic instead of a silent no-op.
+ */
+function requireSupportedHost(context: PluginActivationContext): void {
+  if (context.selection === undefined) {
+    throw new Error(
+      `PI WEB Casual requires PI WEB ${MINIMUM_PI_WEB_VERSION} or newer. ` +
+        "This host predates the browser plugin selection service and application panels, " +
+        "so Casual has nothing to render. Update PI WEB, then reload the browser.",
+    );
+  }
+}
+
 const plugin: PiWebPlugin = {
   apiVersion: 4,
   name: "PI WEB Casual",
   activate: (context: PluginActivationContext) => {
+    requireSupportedHost(context);
     setSelectionService(context.selection);
     startCasualHostBridge(context.lifetimeSignal);
 
