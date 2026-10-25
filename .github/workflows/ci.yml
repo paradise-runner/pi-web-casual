@@ -9,27 +9,19 @@ permissions:
   contents: read
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  checks:
+    # Self-hosted Mac runner. `darwin` is a label we register on both the
+    # GitHub Actions runner and the Forgejo runner, so this file works for
+    # either forge without edits.
+    runs-on: [self-hosted, darwin]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-
-      - name: Install
-        run: npm ci --ignore-scripts
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Build
-        run: npm run build
-
-      - name: Verify committed dist matches source
-        run: git diff --exit-code -- dist
-
-      - name: Verify package contents
-        run: npm pack --dry-run
+      # Dagger is installed and pinned on the runner itself (see
+      # docs/dagger-ci.md). Nothing here downloads or builds a toolchain:
+      # every step below runs in the engine's containers.
+      - name: Dagger checks
+        run: dagger check --progress=plain
+        env:
+          DAGGER_NO_NAG: "1"
+          DO_NOT_TRACK: "1"

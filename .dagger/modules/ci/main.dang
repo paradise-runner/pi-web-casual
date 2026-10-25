@@ -1,0 +1,55 @@
+"""
+CI for pi-web-casual, replacing the GitHub Actions job with Dagger checks.
+
+Local use:   dagger check
+CI use:      dagger check   (on any runner; same result)
+"""
+
+type Ci {
+  """Project source, minus the paths that must never invalidate the cache."""
+  pub source: Directory!
+
+  """The dist/ directory as committed in the workspace."""
+  pub published: Directory!
+
+  new(ws: Workspace!) {
+    self.source = ws.directory(
+      "/",
+      exclude: ["node_modules", ".git", "dist", ".next"],
+    )
+    self.published = ws.directory("/dist")
+    self
+  }
+
+  """Node toolchain with dependencies installed from the lockfile."""
+  pub base: Container! {
+    container
+      .from("node:22-slim")
+      .withWorkdir("/src")
+      .withMountedCache("/root/.npm", cacheVolume("npm"))
+      .withDirectory("/src", source)
+      .withExec(["npm", "ci", "--ignore-scripts"])
+  }
+
+  """Typecheck the sources."""
+  pub typecheck: Void @check {
+    base.withExec(["npm", "run", "typecheck"]).sync
+    null
+  }
+
+  """Build, then fail if the committed dist/ does not match the build output."""
+  pub distFresh: Void @check {
+    base
+      .withMountedDirectory("/committed", published)
+      .withExec(["npm", "run", "build"])
+      .withExec(["sh", "-c", "diff -r /committed dist"])
+      .sync
+    null
+  }
+
+  """Verify the publishable package contents."""
+  pub pack: Void @check {
+    base.withExec(["npm", "pack", "--dry-run"]).sync
+    null
+  }
+}
