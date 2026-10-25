@@ -1,5 +1,6 @@
+import { startCasualActivityBridge } from "./activity.js";
 import { changeCasualHome, newCasualChat, openCasual, openCasualInOwnTab, resetCasualLink, runtimeOpenContext, setSelectionService, } from "./casual.js";
-import { startCasualHostBridge } from "./dom.js";
+import { startCasualHostBridge, TAB_COLOR_VARIABLE } from "./dom.js";
 import { renderPanel } from "./panel.js";
 /**
  * Oldest PI WEB with the browser v4 surface Casual is built on: application
@@ -28,6 +29,7 @@ const plugin = {
         requireSupportedHost(context);
         setSelectionService(context.selection);
         startCasualHostBridge(context.lifetimeSignal);
+        startCasualActivityBridge(context.lifetimeSignal);
         const actions = [
             {
                 id: "open",
@@ -81,9 +83,11 @@ const plugin = {
                     {
                         id: "casual",
                         title: "Casual",
-                        icon: context.html `
-              <span aria-hidden="true" style="font-size:17px;line-height:1;font-weight:600">\u2042</span>
-            `,
+                        // The glyph reads its color from a custom property the host bridge
+                        // keeps in step with the casual chat's agent state, so the tab
+                        // carries the same green working / accent unread signal as a
+                        // session row's dot.
+                        icon: context.html `<span aria-hidden="true" style="font-size:17px;line-height:1;font-weight:600;color:var(${TAB_COLOR_VARIABLE},currentColor)">\u2042</span>`,
                         order: 0,
                         render: (panel) => renderPanel(context.html, panel),
                     },

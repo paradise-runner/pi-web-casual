@@ -50,6 +50,15 @@ export function readRecord(machineId: string): CasualRecord {
   return { ...(readStore().machines[machineId] ?? {}) };
 }
 
+/** Every machine this browser has a pointer for, keyed by machine id. */
+export function readRecords(): Readonly<Record<string, CasualRecord>> {
+  const records: Record<string, CasualRecord> = {};
+  for (const [machineId, record] of Object.entries(readStore().machines)) {
+    records[machineId] = { ...record };
+  }
+  return records;
+}
+
 export function patchRecord(machineId: string, patch: Partial<CasualRecord>): CasualRecord {
   const store = readStore();
   const next: CasualRecord = { ...(store.machines[machineId] ?? {}), ...patch };

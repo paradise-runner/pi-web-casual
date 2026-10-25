@@ -1,4 +1,15 @@
+import type { CasualActivity } from "./types.js";
+
 const HIDDEN_PROJECT_ATTR = "data-pi-web-casual-hidden";
+/** Stylesheet that hides the home project from the moment its row is rendered. */
+const PROJECT_STYLE_ATTR = "data-pi-web-casual-project-style";
+/** Custom property the Casual tab icon reads its color from. */
+export const TAB_COLOR_VARIABLE = "--pi-web-casual-tab-color";
+/** Reports the painted agent state on the document root and the Casual tab. */
+const ACTIVITY_ATTR = "data-pi-web-casual-activity";
+const CASUAL_TAB_LABEL = "Casual";
+/** Safety net for shadow roots created while nothing was observing their parent. */
+const BRIDGE_INTERVAL_MS = 1000;
 const EMBED_STYLE_ATTR = "data-pi-web-casual-embed";
 /** Window name of the frame the Casual panel embeds, so the plugin stays quiet inside it. */
 export const EMBED_FRAME_NAME = "pi-web-casual-embed";
@@ -67,14 +78,70 @@ function restoreProjectRow(row: HTMLElement): void {
   row.removeAttribute(HIDDEN_PROJECT_ATTR);
 }
 
+function setProjectRowHidden(row: HTMLElement, hidden: boolean): void {
+  if (!hidden) {
+    if (row.hasAttribute(HIDDEN_PROJECT_ATTR)) restoreProjectRow(row);
+    return;
+  }
+  if (row.style.getPropertyValue("display") !== "none") row.style.display = "none";
+  if (row.getAttribute("aria-hidden") !== "true") row.setAttribute("aria-hidden", "true");
+  if (!row.hasAttribute("inert")) row.setAttribute("inert", "");
+  if (row.getAttribute(HIDDEN_PROJECT_ATTR) !== "1") row.setAttribute(HIDDEN_PROJECT_ATTR, "1");
+}
+
+/** The shadow roots that hold project rows, discovered from the navigation panel. */
+function projectListShadowRoots(): ShadowRoot[] {
+  const app = appShadowRoot();
+  if (app === undefined) return [];
+  const roots: ShadowRoot[] = [];
+  for (const panel of app.querySelectorAll("app-navigation-panel")) {
+    if (panel.shadowRoot === null) continue;
+    for (const list of panel.shadowRoot.querySelectorAll("project-list")) {
+      if (list.shadowRoot !== null) roots.push(list.shadowRoot);
+    }
+  }
+  return roots;
+}
+
+/**
+ * Hiding a row with script only after it renders leaves it painted for a moment
+ * on every render of the project list — expanding the Projects section, a
+ * machine switch, or any later Lit update. A stylesheet in the component's own
+ * shadow root wins the race: the row is born hidden, and script below only
+ * handles what CSS cannot (the count and the collapsed-heading summary).
+ */
+const PROJECT_STYLE_CSS = `
+  [data-project-id][title$=".casual-pi-web" i],
+  [data-project-id][title$=".casual-pi-web/" i] { display: none !important; }
+`;
+
+function ensureProjectStyle(root: ShadowRoot): void {
+  if (root.querySelector(`style[${PROJECT_STYLE_ATTR}]`) !== null) return;
+  const style = root.ownerDocument.createElement("style");
+  style.setAttribute(PROJECT_STYLE_ATTR, "1");
+  style.textContent = PROJECT_STYLE_CSS;
+  root.append(style);
+}
+
+/** Format a count the way the host does, so the corrected text does not oscillate. */
+function formatCount(value: number): string {
+  const language = document.documentElement.lang;
+  try {
+    return new Intl.NumberFormat(language === "" ? undefined : language).format(value);
+  } catch {
+    return String(value);
+  }
+}
+
 /**
  * Hide the plugin-managed default project from the sidebar project list. It
  * stays a real project for the host, but is reachable only through the \u2042
- * button/tab. The host's project-list component exposes `projects` and
- * `selected`, so this also works while the section is collapsed and has no
- * rendered rows. This is best-effort shadow-DOM work, like the extra button.
+ * tab. The host's project-list component exposes `projects` and `selected`, so
+ * this also works while the section is collapsed and has no rendered rows.
+ * Best-effort shadow-DOM work, done on every host render.
  */
-function hideCasualProjectRows(root: ShadowRoot): void {
+function syncProjectList(root: ShadowRoot): void {
+  ensureProjectStyle(root);
   const host = root.host as ProjectListHost;
   const projects = Array.isArray(host.projects) ? host.projects : undefined;
   if (projects === undefined) return;
@@ -83,19 +150,13 @@ function hideCasualProjectRows(root: ShadowRoot): void {
     (project) => !CASUAL_PROJECT_PATH.test(project.path ?? ""),
   );
   for (const row of root.querySelectorAll<HTMLElement>("[data-project-id]")) {
-    if (isCasualProjectRow(row)) {
-      row.style.display = "none";
-      row.setAttribute("aria-hidden", "true");
-      row.setAttribute("inert", "");
-      row.setAttribute(HIDDEN_PROJECT_ATTR, "1");
-    } else if (row.hasAttribute(HIDDEN_PROJECT_ATTR)) {
-      restoreProjectRow(row);
-    }
+    setProjectRowHidden(row, isCasualProjectRow(row));
   }
 
   const count = root.querySelector<HTMLElement>(".section-count");
-  if (count !== null && (count.textContent ?? "").trim() !== String(visibleProjects.length)) {
-    count.textContent = String(visibleProjects.length);
+  if (count !== null) {
+    const expected = formatCount(visibleProjects.length);
+    if ((count.textContent ?? "").trim() !== expected) count.textContent = expected;
   }
 
   if (host.selected !== undefined && CASUAL_PROJECT_PATH.test(host.selected.path ?? "")) {
@@ -105,39 +166,183 @@ function hideCasualProjectRows(root: ShadowRoot): void {
 }
 
 /**
- * Hide the default Casual project from the sidebar so Casual stays out of the
- * project list. PI WEB has no contribution point for this, so it is
- * deliberately best-effort and isolated here; a page update may change the
- * markup. The Casual tab and the palette actions are the supported surfaces and
- * keep working either way.
+ * Agent state for the Casual tab, matching the host's own dots: green while the
+ * agent works in the home, accent while a finished reply is still unread.
+ */
+const ACTIVITY_DETAIL: Record<CasualActivity, string | undefined> = {
+  idle: undefined,
+  working: "agent working",
+  done: "reply unread",
+};
+const ACTIVITY_COLOR: Record<CasualActivity, string | undefined> = {
+  idle: undefined,
+  working: "var(--pi-success)",
+  done: "var(--pi-accent)",
+};
+
+let hostActivity: CasualActivity = "idle";
+/** The activation that owns the bridge; a second machine registration reuses it. */
+let bridgeSignal: AbortSignal | undefined;
+const tabOriginals = new WeakMap<HTMLElement, { title: string | null; ariaLabel: string | null }>();
+
+/**
+ * Report the casual agent state on the tab. The icon reads its color from a
+ * custom property set on the document root, which reaches it through the host's
+ * shadow boundary without touching attributes the host owns; the tab's title
+ * and accessible name carry the same state for anyone not reading color.
+ */
+export function setCasualHostActivity(activity: CasualActivity): void {
+  hostActivity = activity;
+  applyCasualActivity(activity);
+}
+
+function applyCasualActivity(activity: CasualActivity): void {
+  const root = document.documentElement;
+  const style = root.style;
+  const color = ACTIVITY_COLOR[activity];
+  if (color === undefined) {
+    // Idle leaves no trace on the host document.
+    if (style.getPropertyValue(TAB_COLOR_VARIABLE) !== "") style.removeProperty(TAB_COLOR_VARIABLE);
+    if (root.hasAttribute(ACTIVITY_ATTR)) root.removeAttribute(ACTIVITY_ATTR);
+  } else {
+    if (style.getPropertyValue(TAB_COLOR_VARIABLE) !== color) style.setProperty(TAB_COLOR_VARIABLE, color);
+    if (root.getAttribute(ACTIVITY_ATTR) !== activity) root.setAttribute(ACTIVITY_ATTR, activity);
+  }
+
+  const detail = ACTIVITY_DETAIL[activity];
+  for (const root of knownShadowRoots()) {
+    for (const label of root.querySelectorAll<HTMLElement>(".tab-label")) {
+      if ((label.textContent ?? "").trim() !== CASUAL_TAB_LABEL) continue;
+      const button = label.closest("button");
+      if (button !== null) decorateCasualTab(button, activity, detail);
+    }
+  }
+}
+
+function decorateCasualTab(button: HTMLElement, activity: CasualActivity, detail: string | undefined): void {
+  const original = tabOriginals.get(button);
+  if (detail === undefined) {
+    if (original === undefined) return;
+    writeAttribute(button, "title", original.title);
+    writeAttribute(button, "aria-label", original.ariaLabel);
+    button.removeAttribute(ACTIVITY_ATTR);
+    tabOriginals.delete(button);
+    return;
+  }
+  if (original === undefined) {
+    tabOriginals.set(button, {
+      title: button.getAttribute("title"),
+      ariaLabel: button.getAttribute("aria-label"),
+    });
+  }
+  if (button.getAttribute(ACTIVITY_ATTR) !== activity) button.setAttribute(ACTIVITY_ATTR, activity);
+  writeAttribute(button, "title", `${CASUAL_TAB_LABEL} \u2014 ${detail}`);
+  writeAttribute(button, "aria-label", `${CASUAL_TAB_LABEL}, ${detail}`);
+}
+
+function writeAttribute(element: Element, name: string, value: string | null): void {
+  if (value === null) {
+    if (element.hasAttribute(name)) element.removeAttribute(name);
+    return;
+  }
+  if (element.getAttribute(name) !== value) element.setAttribute(name, value);
+}
+
+/**
+ * Keep the plugin's best-effort chrome in step with the host: the hidden casual
+ * project row and the Casual tab's agent state. PI WEB has no contribution point
+ * for either, so this is deliberately best-effort and isolated here; a page
+ * update may change the markup. The Casual tab and the palette actions are the
+ * supported surfaces and keep working either way.
+ *
+ * Every pass is idempotent and cheap, and is driven by the host's own
+ * mutations — a 500 ms poll was long enough for the hidden row to be visible
+ * after the Projects section re-rendered. The interval that remains only picks
+ * up shadow roots created while nothing was observing their parent.
  */
 export function startCasualHostBridge(signal: AbortSignal): void {
   // Inside the panel's embedded frame the sidebar is hidden anyway, and
   // rewriting it there would fight the surface around it.
   if (isEmbeddedFrame()) return;
+  // One bridge per page: PI WEB registers a machine-specific package once per
+  // machine that has it, and only one tab can carry the state anyway.
+  if (bridgeSignal !== undefined) return;
+  bridgeSignal = signal;
 
+  let scheduled = false;
   const ensure = (): void => {
     if (signal.aborted) return;
     try {
-      for (const root of knownShadowRoots()) hideCasualProjectRows(root);
+      applyCasualActivity(hostActivity);
+      for (const root of projectListShadowRoots()) syncProjectList(root);
     } catch (error) {
-      console.warn("[pi-web-casual] could not hide the casual project row", error);
+      console.warn("[pi-web-casual] could not update the host chrome", error);
     }
   };
 
-  ensure();
-  const interval = window.setInterval(ensure, 500);
+  // Every pass also picks up shadow roots that appeared since the last one, so
+  // a panel created after activation is covered on the mutation that created
+  // it rather than at the next interval.
+  const pass = (): void => {
+    ensure();
+    observeKnownRoots();
+  };
+
+  // Mutation callbacks run before the browser paints, so the fix lands in the
+  // same frame as the markup that needed it.
+  const schedule = (): void => {
+    if (scheduled) return;
+    scheduled = true;
+    queueMicrotask(() => {
+      scheduled = false;
+      pass();
+    });
+  };
+
+  const observed = new Set<ShadowRoot>();
+  const observer = new MutationObserver(() => {
+    schedule();
+  });
+  const observeKnownRoots = (): void => {
+    for (const root of observed) {
+      if (root.host.isConnected) continue;
+      observed.delete(root);
+    }
+    for (const root of [...knownShadowRoots(), ...projectListShadowRoots()]) {
+      if (observed.has(root)) continue;
+      observed.add(root);
+      observer.observe(root, {
+        childList: true,
+        subtree: true,
+        // The project count and the collapsed summary are text updates, which
+        // no child-list event reports. Everywhere else, text changes are the
+        // streaming chat and are not worth a pass.
+        characterData: root.host.tagName === "PROJECT-LIST",
+      });
+    }
+  };
+
+  pass();
+  const interval = window.setInterval(pass, BRIDGE_INTERVAL_MS);
+  // The app element may not exist yet at activation; keep looking for its
+  // shadow roots until the interval takes over.
+  schedule();
   signal.addEventListener(
     "abort",
     () => {
       window.clearInterval(interval);
-      for (const root of knownShadowRoots()) {
+      observer.disconnect();
+      observed.clear();
+      if (bridgeSignal === signal) bridgeSignal = undefined;
+      setCasualHostActivity("idle");
+      for (const root of projectListShadowRoots()) {
         for (const row of root.querySelectorAll<HTMLElement>(`[${HIDDEN_PROJECT_ATTR}]`)) {
           restoreProjectRow(row);
         }
         const rows = root.querySelectorAll("[data-project-id]");
         const count = root.querySelector<HTMLElement>(".section-count");
-        if (rows.length > 0 && count !== null) count.textContent = String(rows.length);
+        if (rows.length > 0 && count !== null) count.textContent = formatCount(rows.length);
+        root.querySelector(`style[${PROJECT_STYLE_ATTR}]`)?.remove();
       }
     },
     { once: true },

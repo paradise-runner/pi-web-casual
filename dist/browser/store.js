@@ -32,6 +32,14 @@ function writeStore(store) {
 export function readRecord(machineId) {
     return { ...(readStore().machines[machineId] ?? {}) };
 }
+/** Every machine this browser has a pointer for, keyed by machine id. */
+export function readRecords() {
+    const records = {};
+    for (const [machineId, record] of Object.entries(readStore().machines)) {
+        records[machineId] = { ...record };
+    }
+    return records;
+}
 export function patchRecord(machineId, patch) {
     const store = readStore();
     const next = { ...(store.machines[machineId] ?? {}), ...patch };
