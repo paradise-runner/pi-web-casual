@@ -41,6 +41,8 @@ Then reload the browser. No session-daemon restart is needed for this plugin.
 
 - First run in a clean PI WEB data directory creates `~/.casual-pi-web`, trusts it, starts a session, and opens the chat.
 - The sidebar hides the Casual project row and shows the adjusted project count, both expanded and collapsed.
+- Expanding and collapsing **Projects** (and redrawing the sidebar) never paints the Casual row; a cold page load may show it only until the plugin has loaded.
+- The Casual tab's **⁂** turns green while the casual chat is working and accent while a finished reply is unread, with a matching tooltip and accessible name, and returns to no tint when nothing is in flight.
 - The Casual tab embeds the chat once a session is remembered, with the frame's navigation and header hidden; the composer stays usable and sending a message round-trips.
 - The embedded state renders the chat alone: no card, header, or toolbar above or below it, and every control is reachable from the palette.
 - When the embedded frame cannot be trimmed into a usable chat, it falls back to a full app and **Open chat** still gives a full view.
@@ -70,7 +72,7 @@ node .agents/skills/repo-docs/scripts/check-doc-links.mjs .
 
 ## Shadow-DOM work
 
-The hidden project row and the embedded frame's chrome trimming live in PI WEB's private shadow DOM. Keep that code isolated in `src/browser/dom.ts`, make it fail gracefully, and test it against both the oldest supported PI WEB version and the latest release. If a PI WEB update changes selectors, the supported fallbacks are the **Casual** tab and the plugin's palette actions.
+The hidden project row, the tab's status tint, and the embedded frame's chrome trimming live in PI WEB's private shadow DOM. Keep that code isolated in `src/browser/dom.ts`, make it fail gracefully, and test it against both the oldest supported PI WEB version and the latest release. If a PI WEB update changes selectors, the supported fallbacks are the **Casual** tab and the plugin's palette actions.
 
 ## Pull requests
 

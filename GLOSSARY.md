@@ -62,6 +62,10 @@ _Avoid_: setup wizard, installer
 The `Casual` row filtered out of the **Projects** sidebar, including the project count. The project itself still exists for PI WEB.
 _Avoid_: deleted project, orphan project
 
+**Tab status**:
+What the **Casual** tab's **⁂** reports in PI WEB's own colors: green while the agent is working in the home, accent while a finished reply is still unread, and untinted when nothing is in flight. The tab's tooltip and accessible name carry the same state.
+_Avoid_: badge, counter, notification number
+
 **Best-effort chrome**:
-Plugin behavior that relies on PI WEB's private shadow DOM rather than a public contribution point: the hidden project row and the embedded frame's chrome trimming.
+Plugin behavior that relies on PI WEB's private shadow DOM rather than a public contribution point: the hidden project row, the tab status, and the embedded frame's chrome trimming.
 _Avoid_: hack, monkey patch

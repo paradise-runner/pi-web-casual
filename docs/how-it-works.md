@@ -13,9 +13,20 @@ Casual is a browser-only PI WEB plugin that adds a single long-running conversat
 | **Casual** application panel (tab) | PI WEB tab bar, desktop and mobile | [`src/browser/index.ts`](../src/browser/index.ts), [`panel.ts`](../src/browser/panel.ts) |
 | Palette actions — *Open Casual Chat*, *Open Casual Chat in Its Own Tab*, *New Casual Chat*, *Set Up Casual Chat* | Actions palette, group "Casual" | [`src/browser/index.ts`](../src/browser/index.ts) |
 | Hidden project row | Sidebar **Projects** list | [`src/browser/dom.ts`](../src/browser/dom.ts) |
+| Tab status color | **Casual** tab icon, desktop and mobile | [`src/browser/activity.ts`](../src/browser/activity.ts), [`dom.ts`](../src/browser/dom.ts) |
 | Embedded chat | Casual tab, same-origin frame | [`src/browser/panel.ts`](../src/browser/panel.ts) |
 
 Everything else is navigation into PI WEB's own screens.
+
+## Tab status
+
+The **Casual** tab's **⁂** carries the same agent signal a project row would have carried before it was hidden: green (`--pi-success`) while a session in the home is working, accent (`--pi-accent`) while a finished reply is unread, and no tint when nothing is in flight.
+
+- The state comes from the host's machine status snapshot, read from `api/machines/<machineId>/status` for every machine that has a pointer, every four seconds while the page is visible. That endpoint is internal, on the same footing as first-run project creation; the public catalog cannot express "unread" and does not exist on `1.202610.3` ([ADR 0010](adr/0010-the-tab-reports-agent-activity.md)).
+- `core:working` and `core:unread` are read from the casual project's node. A project missing from the snapshot has nothing in flight. Any machine working wins over any machine unread.
+- The color reaches the plugin's own icon markup as a custom property (`--pi-web-casual-tab-color`) set on the document root, so no host-owned style or class is rewritten. The tab's `title` and `aria-label` are set for the same states and restored from the host's values, so the signal is not color-only.
+- A snapshot that cannot be read leaves the last state painted; a hidden document does not poll and refreshes on `visibilitychange`.
+- The embedded frame returns early, so it costs no extra requests.
 
 ## First run
 
@@ -67,7 +78,7 @@ The Casual tab is an application panel, and PI WEB exposes no transcript compone
 - The walk starts at the lowest common ancestor of `chat-view` and `prompt-editor`, and only siblings of that branch are hidden. The transcript's own ancestors are never touched, so this code cannot hide the chat — which is why there is no rollback path.
 - Supervision stops when the frame is disconnected or after five minutes, whichever comes first.
 - `refreshCasualPointer` resolves the home through the catalog and re-patches the casual fields without navigating, so the frame follows the newest live session and a stale pointer cannot embed a route the host rejects.
-- The frame runs a second PI WEB client. `startCasualHostBridge` returns early when `window.name` is the embed name, so the embedded app gets no sidebar filtering of its own.
+- The frame runs a second PI WEB client. `startCasualHostBridge` and `startCasualActivityBridge` both return early when `window.name` is the embed name, so the embedded app gets no sidebar filtering and no status requests of its own.
 - If the panel ever renders inside the embedded app, `isEmbeddedFrame()` makes it show the card instead of nesting another frame.
 
 ## The separate window
@@ -83,16 +94,20 @@ The Casual tab is an application panel, and PI WEB exposes no transcript compone
 
 ## Shadow-DOM integrations
 
-PI WEB exposes no contribution point for hiding a project row or for a chat-only layout, so both are best-effort work on PI WEB's private shadow DOM, deliberately isolated in [`src/browser/dom.ts`](../src/browser/dom.ts):
+PI WEB exposes no contribution point for hiding a project row, for a status color on an application tab, or for a chat-only layout, so all three are best-effort work on PI WEB's private shadow DOM, deliberately isolated in [`src/browser/dom.ts`](../src/browser/dom.ts):
 
 - Host tags consulted: `app-context-bar`, `app-navigation-panel`, `workspace-panel`, `app-mobile-main-tabs`, `status-bar`, `navigation`, `chat-view`, `prompt-editor`.
-- The Casual project row is hidden via `projects`/`selected` on the project-list component, so it also works when the section is collapsed. The `.section-count` text is rewritten to the visible project count.
+- The Casual project row is hidden by a stylesheet injected into the project-list shadow root (marked `data-pi-web-casual-project-style`), so it is hidden from its first paint on every render after activation. The pass that keeps it that way runs from a `MutationObserver` on the host's shadow roots, whose callbacks land before the browser paints, plus a one-second interval as a safety net for newly created shadow roots. A cold page load can still paint the row for the moment between the sidebar's first render and plugin activation, because nothing in the package runs earlier.
+- The `.section-count` text and the collapsed-heading summary are rewritten from script, since CSS cannot subtract a row from a number or blank a summary. The count is formatted with the document's language so the corrected text does not oscillate against the host's own formatting.
+- The **Casual** tab's status tint is the same custom property set on the document root that ADR 0010 describes; the tab's `title` and `aria-label` are the only host-owned attributes the plugin writes, and they are recorded before the first write and restored when nothing is in flight.
 - The embedded frame's chrome is hidden by a supervised pass, described above.
-- If a PI WEB update changes markup, the **Casual** tab and the palette actions keep working. Update the selectors to restore the hidden row or the frame trimming.
+- If a PI WEB update changes markup, the **Casual** tab and the palette actions keep working. Update the selectors to restore the hidden row, the frame trimming, or the tint.
 
 ## Compatibility
 
 Browser API **v4**, so Casual runs on PI WEB `1.202610.3` and `1.202610.6+`. PI WEB `1.202610.6+` logs a deprecation warning for every API-v4 plugin, including its own bundled plugins; moving to API v5 would drop `1.202610.3` support. There is no server entry, no Pi extension, no analytics, and no third-party service.
+
+The plugin talks to two host routes it does not own: `api/machines/<machineId>/projects` (and workspaces, trust, sessions) on first run ([ADR 0003](adr/0003-browser-only-bootstrap-through-host-endpoints.md)), and `api/machines/<machineId>/status` for the tab's tint ([ADR 0010](adr/0010-the-tab-reports-agent-activity.md)). Both are same-origin and both fail soft: first run falls back to the setup card, and the tint keeps its last state. The status flags (`core:working`, `core:unread`) have existed at project level since PI WEB `1.202608.1`, which is older than the plugin's floor.
 
 The floor is enforced at activation, not at install: PI WEB's manifest has no host-version field, so it is the earliest point the plugin runs. `activate` throws when the host does not expose the browser selection service, which also catches `1.202610.1` — that release accepts `apiVersion: 4` but has no application panels, selection service, or project discovery, so the tab could never render. The host reports the throw as `Failed to register PI WEB plugin pi-web-casual during activate`, and none of the palette actions are registered.
 
@@ -104,13 +119,14 @@ The floor is enforced at activation, not at install: PI WEB's manifest has no ho
 | `src/browser/casual.ts` | Project/workspace/session resolution, open/new flows, separate window, embedded-chat source |
 | `src/browser/bootstrap.ts` | First-run project creation, trust, session creation, one-time reload |
 | `src/browser/panel.ts` | Casual panel UI and card |
-| `src/browser/dom.ts` | Host shadow-DOM bridge, hidden project row, embedded-frame supervision |
+| `src/browser/activity.ts` | Agent state for the Casual tab, read from the host status snapshot |
+| `src/browser/dom.ts` | Host shadow-DOM bridge, hidden project row, tab status, embedded-frame supervision |
 | `src/browser/store.ts` | Per-machine remembered state |
-| `src/browser/types.ts` | Optional catalog contract used on newer hosts |
+| `src/browser/types.ts` | Optional catalog contract used on newer hosts, plus the status fields the tab reads |
 
 Generated `dist/browser` files are committed because PI WEB serves them directly from the installed package. CI verifies that the committed output matches source.
 
-Bootstrap, project registration, and the shadow-DOM surface each have a recorded decision: [ADR 0003](adr/0003-browser-only-bootstrap-through-host-endpoints.md), [ADR 0005](adr/0005-best-effort-private-shadow-dom.md). The chat surface and scope are covered by [ADR 0001](adr/0001-one-long-running-conversation.md) and [ADR 0002](adr/0002-native-chat-not-an-agent-client.md); version support by [ADR 0004](adr/0004-stay-on-browser-plugin-api-v4.md); the separate window by [ADR 0007](adr/0007-casual-opens-in-its-own-window.md); the embedded chat by [ADR 0008](adr/0008-panel-embeds-the-chat-in-a-same-origin-frame.md); the removal of the header button by [ADR 0009](adr/0009-the-tab-replaces-the-header-button.md).
+Bootstrap, project registration, and the shadow-DOM surface each have a recorded decision: [ADR 0003](adr/0003-browser-only-bootstrap-through-host-endpoints.md), [ADR 0005](adr/0005-best-effort-private-shadow-dom.md). The chat surface and scope are covered by [ADR 0001](adr/0001-one-long-running-conversation.md) and [ADR 0002](adr/0002-native-chat-not-an-agent-client.md); version support by [ADR 0004](adr/0004-stay-on-browser-plugin-api-v4.md); the separate window by [ADR 0007](adr/0007-casual-opens-in-its-own-window.md); the embedded chat by [ADR 0008](adr/0008-panel-embeds-the-chat-in-a-same-origin-frame.md); the removal of the header button by [ADR 0009](adr/0009-the-tab-replaces-the-header-button.md); the tab's status color by [ADR 0010](adr/0010-the-tab-reports-agent-activity.md).
 
 ## Releasing
 

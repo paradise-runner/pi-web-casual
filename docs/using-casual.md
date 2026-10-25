@@ -28,6 +28,8 @@ If those endpoints are unreachable, the panel shows a setup card instead. Add `~
 
 The Casual tab is a chat surface of its own. Once a conversation is remembered it embeds the real PI WEB chat in a same-origin frame, with that frame's navigation, header, and workspace columns hidden, so the chat fills the tab and your project chat in the main column keeps working beside it.
 
+The tab's **⁂** also reports what the conversation is doing, using the same colors as the sidebar's dots: green while the agent is working, accent while a finished reply is waiting for you, and untinted when nothing is in flight. The tooltip and screen-reader name say the same thing, so the state does not depend on seeing the color.
+
 There is no toolbar, header, or card around it: the chat is the tab. The frame's chrome trimming is verified as it loads, and if the chat does not come out usable the frame falls back to a full app rather than an empty box — in that case use **Actions → Casual → Open Casual Chat** for a full view.
 
 Setup, opening, and error states replace the frame with their card, because those need controls rather than a transcript. Everything else you might reach for is a palette action:
@@ -73,7 +75,7 @@ Either way the new session becomes the one the tab embeds, and the previous conv
 ## History and storage
 
 - The conversation is a normal PI WEB session in the project `Casual` at `~/.casual-pi-web`.
-- That project's row and count are filtered out of the **Projects** sidebar. The project still exists: it appears in the **Change home** chooser, and its sessions appear in **Sessions** while it is selected.
+- That project's row and count are filtered out of the **Projects** sidebar, and the row does not appear when the section is expanded or the sidebar is redrawn. The project still exists: it appears in the **Change home** chooser, and its sessions appear in **Sessions** while it is selected.
 - The plugin remembers the project, workspace, and session in `localStorage` under `pi-web-casual:store:v2`, per machine. Conversation content is never stored by the plugin.
 - A second machine has its own pointer and finds or creates its own casual session.
 
@@ -88,7 +90,8 @@ Either way the new session becomes the one the tab embeds, and the previous conv
 | The card keeps showing setup | Add `~/.casual-pi-web` through **Add Project**, or choose an existing project as the home. |
 | You want a clean start | **New Casual Chat**. Previous conversations stay in **Sessions**. |
 | Casual should live elsewhere | **Change home** and pick a folder or project. |
-| The Casual project row reappeared in the sidebar | A PI WEB update changed its private markup. The Casual tab and palette still work; see [issue tracker](https://github.com/paradise-runner/pi-web-casual/issues). |
+| The Casual project row reappeared in the sidebar | A PI WEB update changed its private markup, or the page is still loading and the plugin has not run yet. If it stays visible, the Casual tab and palette still work; see [issue tracker](https://github.com/paradise-runner/pi-web-casual/issues). |
+| The Casual tab never changes color | PI WEB changed the status endpoint or flags the tab reads, or the page is a host without them. Casual keeps working; the tab simply stays untinted. |
 
 ## Privacy
 
