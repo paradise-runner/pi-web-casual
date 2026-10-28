@@ -15,7 +15,7 @@ jobs:
     # either forge without edits.
     runs-on: [self-hosted, darwin]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Dagger is installed and pinned on the runner itself (see
       # docs/dagger-ci.md). Nothing here downloads or builds a toolchain:
