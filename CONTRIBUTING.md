@@ -46,7 +46,8 @@ Then reload the browser. No session-daemon restart is needed for this plugin.
 - The Casual tab embeds the chat once a session is remembered, with the frame's navigation and header hidden; the composer stays usable and sending a message round-trips.
 - The embedded chat reaches the panel's bottom edge on a phone in a normal browser tab and in the installed app, with no dead strip under the composer, and a reply still scrolls into view after the keyboard or address bar changes the viewport height.
 - **+** in the strip adds a conversation and opens it without reloading the page (the chat keeps running, and switching back does not boot it again); numbers append and keep their order.
-- **×** on the active conversation archives it, the next tab becomes active, and the conversation appears in PI WEB's **Archived** sessions where it can be restored; the last remaining tab has no **×**.
+- **×** on the active conversation archives it, the next tab becomes active, and the strip offers **Undo**, which restores the conversation and puts its tab back in the same place; the last remaining tab has no **×**.
+- A tab whose conversation is archived elsewhere disappears on the next refresh instead of leaving a tab that opens an error.
 - ←/→/Home/End move between conversations and open the tab they land on.
 - A conversation that was started and never used drops its tab on **×** without an error message.
 - Reloading with several conversations keeps the strip, keeps the active one, drops tabs whose conversation was archived elsewhere, and does not reload the chat when switching.

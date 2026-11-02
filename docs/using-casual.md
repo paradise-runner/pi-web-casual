@@ -34,7 +34,8 @@ Above the chat is a thin strip of numbered conversations, oldest first:
 
 - **Click a number** to switch conversations. Switching is instant: the chat keeps running and only the conversation changes.
 - **+** starts another conversation in the same home and opens it. It is appended on the right, so the numbers before it do not move.
-- **×** on the active tab archives that conversation. PI WEB moves it to its own **Archived** sessions, where you can restore it; Casual never deletes history. The last remaining tab has no **×**, so Casual always has a conversation to show.
+- **×** on the active tab archives that conversation. PI WEB moves it to its own **Archived** sessions and the strip immediately offers **Undo**, which puts it back in the same place and reopens it; Casual never deletes history. The last remaining tab has no **×**, so Casual always has a conversation to show.
+- Because Casual's home project is hidden from **Projects**, **Undo** is the practical way back from a misclick. The conversation is also in PI WEB's **Archived** sessions if you select the `Casual` project there, and in **Sessions** while it is live.
 - Tab numbers follow position: close conversation 2 of 4 and the old 3 and 4 become 2 and 3.
 - Each tab's tooltip and screen-reader name carry the conversation's name once the agent has given it one, so a number alone is never the only label.
 - The strip is visible even with a single conversation, so **+** is always within reach.
@@ -97,7 +98,7 @@ Either way the new session becomes the one the tab embeds, and the previous conv
 | Casual never appears after install | PI WEB is older than `1.202610.3`. The browser console shows `PI WEB Casual requires PI WEB 1.202610.3 or newer`; update PI WEB, then reload the browser. |
 | The conversation seems gone | Open Casual again. It keeps the strip as it was, drops tabs whose conversation was archived elsewhere, and takes the newest live session if the active one is gone. |
 | The remembered session was archived or deleted | Same: opening Casual replaces the stale pointer with the newest live session. |
-| I closed a conversation and want it back | It is in PI WEB's **Archived** sessions, restore it there. |
+| I closed a conversation and want it back | Click **Undo** in the strip. If the notice is gone, the conversation is still in PI WEB's **Archived** sessions — select the `Casual` project in **Projects** or **Change home** to reach them. |
 | The card keeps showing an error | **Retry** once, then **Reset link**, then reopen. |
 | The card keeps showing setup | Add `~/.casual-pi-web` through **Add Project**, or choose an existing project as the home. |
 | You want a clean start | **New Casual Chat**. Previous conversations stay in **Sessions**. |

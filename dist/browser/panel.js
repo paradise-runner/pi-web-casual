@@ -1,5 +1,5 @@
 import { acknowledgeCasualUnread } from "./activity.js";
-import { activateCasualTab, archiveCasualTab, casualChatSrc, casualStripNotice, changeCasualHome, chooseProject, getStatus, newCasualChat, newCasualTab, openCasual, openCasualInOwnTab, panelOpenContext, readCasualTabs, refreshCasualPointer, resetCasualLink, } from "./casual.js";
+import { activateCasualTab, archiveCasualTab, casualArchiveUndo, casualChatSrc, casualStripNotice, changeCasualHome, chooseProject, getStatus, newCasualChat, newCasualTab, openCasual, openCasualInOwnTab, panelOpenContext, readCasualTabs, refreshCasualPointer, resetCasualLink, undoCasualArchive, } from "./casual.js";
 import { clickActionsButton, EMBED_FRAME_NAME, embeddedChatSession, findCasualFrame, isEmbeddedFrame, superviseEmbeddedChat, switchEmbeddedChat, } from "./dom.js";
 import { readRecord } from "./store.js";
 const NO_CONVERSATION = "No conversation yet";
@@ -139,6 +139,18 @@ const newTabStyle = [
     "font:600 14px/1 var(--pi-font,system-ui,sans-serif)",
     "cursor:pointer",
 ].join(";");
+const undoStyle = [
+    "box-sizing:border-box",
+    "flex:0 0 auto",
+    "height:24px",
+    "padding:0 7px",
+    "border:1px solid var(--pi-accent-border)",
+    "border-radius:6px",
+    "background:var(--pi-selection-bg)",
+    "color:var(--pi-text)",
+    "font:600 11px/1 var(--pi-font,system-ui,sans-serif)",
+    "cursor:pointer",
+].join(";");
 const noticeStyle = [
     "flex:0 1 auto",
     "min-width:0",
@@ -199,7 +211,7 @@ export function renderPanel(html, context) {
         const frameSrc = mounted ? (frame.getAttribute("src") ?? src) : src;
         return html `
       <div style=${shellStyle}>
-        ${renderStrip(html, open, readCasualTabs(context.machine.id), casualStripNotice(context.machine.id))}
+        ${renderStrip(html, open, readCasualTabs(context.machine.id), casualStripNotice(context.machine.id), casualArchiveUndo(context.machine.id))}
         <iframe
           name=${EMBED_FRAME_NAME}
           src=${frameSrc}
@@ -242,7 +254,7 @@ export function renderPanel(html, context) {
  * active tab carries the **×** that archives it; the last tab keeps no **×**,
  * because Casual always has one conversation to show.
  */
-function renderStrip(html, open, tabs, notice) {
+function renderStrip(html, open, tabs, notice, undo) {
     const lastOne = tabs.length <= 1;
     return html `
     <div style=${stripStyle}>
@@ -283,7 +295,23 @@ function renderStrip(html, open, tabs, notice) {
             </span>
           `)}
       </div>
-      ${notice === undefined ? null : html `<span style=${noticeStyle} role="status">${notice}</span>`}
+      ${undo === undefined
+        ? notice === undefined
+            ? null
+            : html `<span style=${noticeStyle} role="status">${notice}</span>`
+        : html `
+            <span style=${noticeStyle} role="status">${undo.message}</span>
+            <button
+              type="button"
+              style=${undoStyle}
+              title="Put the archived conversation back"
+              @click=${() => {
+            void undoCasualArchive(open);
+        }}
+            >
+              Undo
+            </button>
+          `}
       <button
         type="button"
         style=${newTabStyle}

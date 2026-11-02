@@ -1,4 +1,4 @@
-import { bootstrapCasual, casualChatUrl, listHomeSessions, reloadToCasualChat, reloadToCasualPanel, startCasualSession, archiveCasualSession } from "./bootstrap.js";
+import { bootstrapCasual, casualChatUrl, listHomeSessions, reloadToCasualChat, reloadToCasualPanel, startCasualSession, archiveCasualSession, restoreCasualSession } from "./bootstrap.js";
 import { clickStartSession, waitFor } from "./dom.js";
 import { patchRecord, readRecord } from "./store.js";
 const statuses = new Map();
@@ -9,6 +9,14 @@ const statuses = new Map();
  */
 const stripNotices = new Map();
 const stripNoticeTimers = new Map();
+/**
+ * Conversations this page load started. The catalog and the host's session list
+ * only know a session once it has a file, which a session gets with its first
+ * message, so a brand-new conversation is invisible to discovery for a moment.
+ * Without this, a refresh pass would treat it as deleted: it would prune its tab
+ * and pull the user back to an older conversation while they were still typing.
+ */
+const startedHere = new Set();
 const openTasks = new Map();
 const newTasks = new Map();
 const chooserMachines = new Set();
@@ -59,10 +67,18 @@ export function activateCasualTab(context, sessionId) {
     if (record.sessionId === sessionId)
         return;
     const tab = (record.tabs ?? []).find((candidate) => candidate.sessionId === sessionId);
-    if (tab === undefined)
+    // The strip is drawn from the record, so a tab that is on screen but missing
+    // from the record is a bug in the record: adopt the tab rather than ignore the
+    // click, which would make the tab look dead.
+    if (tab === undefined) {
+        setStripNotice(context, undefined);
+        patchRecord(context.machineId, { sessionId });
+        context.requestRender?.();
         return;
+    }
     setStripNotice(context, undefined);
     patchRecord(context.machineId, { sessionId: tab.sessionId, sessionName: tab.sessionName });
+    archiveUndos.delete(context.machineId);
     context.requestRender?.();
 }
 /**
@@ -81,16 +97,59 @@ export async function newCasualTab(context) {
         setStripNotice(context, "Could not start a new conversation.");
         return;
     }
-    patchRecord(context.machineId, { sessionId: created.id, sessionName: created.name });
+    startedHere.add(created.id);
+    archiveUndos.delete(context.machineId);
+    patchRecord(context.machineId, {
+        // Append explicitly as well as making it active: the strip's order is the
+        // user's, and a new conversation belongs at the end of it.
+        tabs: [...(record.tabs ?? []), { sessionId: created.id, ...(created.name === undefined ? {} : { sessionName: created.name }) }],
+        sessionId: created.id,
+        ...(created.name === undefined ? {} : { sessionName: created.name }),
+    });
     setStripNotice(context, undefined);
     context.requestRender?.();
 }
+const archiveUndos = new Map();
+/** The strip's Undo, if the last action there archived something. */
+export function casualArchiveUndo(machineId) {
+    return archiveUndos.get(machineId);
+}
 /**
- * The strip's **×**: archive the conversation and drop its tab. Archiving is the
- * host's own session action, so the conversation keeps its place in PI WEB's
- * **Archived** sessions and can be restored there. The last tab stays: Casual is
- * never left without a conversation to show.
+ * Put back the conversation the last **×** archived. Casual's home row is hidden
+ * from **Projects**, so the host's **Archived** list is awkward to reach from
+ * here; without this, a misclick would look permanent.
  */
+export async function undoCasualArchive(context) {
+    const undo = archiveUndos.get(context.machineId);
+    const record = readRecord(context.machineId);
+    if (undo === undefined || record.projectId === undefined || record.workspaceId === undefined) {
+        return;
+    }
+    const restored = await restoreCasualSession(context.machineId, {
+        projectId: record.projectId,
+        workspaceId: record.workspaceId,
+        sessionId: undo.sessionId,
+    });
+    if (!restored) {
+        setStripNotice(context, "Could not restore that conversation.");
+        archiveUndos.delete(context.machineId);
+        return;
+    }
+    const tabs = [...(record.tabs ?? [])];
+    const at = Math.min(Math.max(undo.index, 0), tabs.length);
+    tabs.splice(at, 0, {
+        sessionId: undo.sessionId,
+        ...(undo.sessionName === undefined ? {} : { sessionName: undo.sessionName }),
+    });
+    patchRecord(context.machineId, {
+        tabs,
+        sessionId: undo.sessionId,
+        ...(undo.sessionName === undefined ? {} : { sessionName: undo.sessionName }),
+    });
+    archiveUndos.delete(context.machineId);
+    setStripNotice(context, undefined);
+    context.requestRender?.();
+}
 export async function archiveCasualTab(context, sessionId) {
     const record = readRecord(context.machineId);
     const tabs = record.tabs ?? [];
@@ -103,11 +162,13 @@ export async function archiveCasualTab(context, sessionId) {
     }
     if (record.projectId === undefined || record.workspaceId === undefined)
         return;
-    const result = await archiveCasualSession(context.machineId, {
+    const archive = {
         projectId: record.projectId,
         workspaceId: record.workspaceId,
         sessionId,
-    });
+    };
+    const name = tabs[index]?.sessionName;
+    const result = await archiveCasualSession(context.machineId, archive);
     if (result === "failed") {
         // A conversation the host's own list does not know was never persisted, so
         // there is nothing to keep and nothing worth reporting.
@@ -126,9 +187,19 @@ export async function archiveCasualTab(context, sessionId) {
             ? {}
             : { sessionId: neighbour.sessionId, sessionName: neighbour.sessionName }),
     });
-    setStripNotice(context, result === "unsupported"
-        ? "Archiving needs a newer PI WEB; the conversation stays in Sessions."
-        : undefined);
+    if (result === "unsupported") {
+        archiveUndos.delete(context.machineId);
+        setStripNotice(context, "Archiving needs a newer PI WEB; the conversation stays in Sessions.");
+    }
+    else {
+        archiveUndos.set(context.machineId, {
+            message: `Archived conversation ${index + 1}.`,
+            sessionId,
+            ...(name === undefined ? {} : { sessionName: name }),
+            index,
+        });
+        setStripNotice(context, undefined);
+    }
     context.requestRender?.();
 }
 function setStatus(context, status) {
@@ -196,6 +267,7 @@ export function chooseProject(context, project) {
 }
 /** Forget the remembered conversation but keep the casual project. */
 export function resetCasualLink(context) {
+    archiveUndos.delete(context.machineId);
     patchRecord(context.machineId, {
         workspaceId: undefined,
         workspacePath: undefined,
@@ -207,6 +279,7 @@ export function resetCasualLink(context) {
 }
 /** Forget the project as well, so the panel offers the project chooser again. */
 export function changeCasualHome(context) {
+    archiveUndos.delete(context.machineId);
     patchRecord(context.machineId, {
         projectId: undefined,
         projectPath: undefined,
@@ -293,15 +366,18 @@ export async function refreshCasualPointer(context) {
         return;
     const latest = readRecord(context.machineId);
     // The catalog answers on newer hosts; the host's own session list answers for
-    // naming and pruning on older ones. Only the catalog may move the active
-    // conversation, because only it knows which sessions are live.
-    const authoritative = target.sessions !== undefined;
+    // naming and pruning on older ones. Both are the host's own view of what is
+    // live, so either may decide that the active conversation was archived.
     const live = target.sessions ?? (await homeSessions(context, latest));
     const tabs = latest.tabs ?? [];
+    // A conversation that is on screen or just created is kept even when discovery
+    // cannot see it yet: pruning those is what made a new tab look dead and pulled
+    // the user back to an older conversation mid-typing.
+    const keep = (id) => id === latest.sessionId || startedHere.has(id);
     const nextTabs = live === undefined
         ? tabs
         : tabs
-            .filter((tab) => live.some((session) => session.id === tab.sessionId))
+            .filter((tab) => keep(tab.sessionId) || live.some((session) => session.id === tab.sessionId))
             .map((tab) => {
             const match = live.find((session) => session.id === tab.sessionId);
             return match?.name === undefined || match.name === tab.sessionName
@@ -310,10 +386,21 @@ export async function refreshCasualPointer(context) {
         });
     const session = target.session;
     // Discovery prefers the remembered conversation when it is still live, so a
-    // different id means the active one was archived or deleted elsewhere.
-    const nextSession = authoritative && session !== undefined && session.id !== latest.sessionId
-        ? session
-        : undefined;
+    // different id means the active one was archived or deleted elsewhere — unless
+    // it was started here and has simply not been written to disk yet.
+    const activeId = latest.sessionId;
+    const activeMissing = live !== undefined &&
+        activeId !== undefined &&
+        !startedHere.has(activeId) &&
+        !live.some((candidate) => candidate.id === activeId);
+    const nextSession = activeMissing && session !== undefined && session.id !== activeId ? session : undefined;
+    // Nothing live left to fall back to: clear the pointer so the tab shows the card
+    // instead of embedding a route the host can no longer open.
+    if (activeMissing && nextSession === undefined) {
+        patchRecord(context.machineId, { sessionId: undefined, sessionName: undefined, tabs: [] });
+        context.requestRender?.();
+        return;
+    }
     const tabsChanged = nextTabs.length !== tabs.length ||
         nextTabs.some((tab, index) => tab.sessionId !== tabs[index]?.sessionId || tab.sessionName !== tabs[index]?.sessionName);
     const locationChanged = latest.projectId !== target.project.id || latest.workspaceId !== target.workspace?.id;

@@ -52,6 +52,9 @@ Above the frame the panel renders a thin strip of numbered conversations ([`pane
 - Numbers are positions in the stored strip, oldest first. **+** appends and activates; **×** archives and activates the neighbour.
 - The **+** does not navigate the host page and does not depend on the sidebar. It starts a session through the same session route first run uses ([`bootstrap.ts`](../src/browser/bootstrap.ts)), then records it as the active tab, so the panel only re-renders.
 - The **×** calls the host's session lifecycle route, `api/machines/<machineId>/plugin-sessions/projects/<projectId>/workspaces/<workspaceId>/sessions/<sessionId>/archive`. That is the route behind PI WEB's own archive action, so the conversation moves to the host's **Archived** sessions and stays restorable; the plugin still has no delete of its own. A conversation that was started and never written to disk has no session file to archive, so its tab is dropped and nothing is reported. A host without the route leaves the conversation alone, and the strip says so.
+- Archiving puts an **Undo** in the strip for the rest of the visit, which calls the same route's `.../restore` and inserts the tab back at its old index. That matters because the home project row is hidden: the host's **Archived** list is not reachable from Casual without uncovering the project.
+- The strip's state lives in the pointer, not in the DOM. Every write normalizes the record, so making a conversation active also persists its tab; before that, a tab could be drawn from the in-memory record and never reach storage, which left the strip and the pointer disagreeing and made tab clicks look dead.
+- A conversation that this page load started is remembered until reload (`startedHere`), because the catalog and the host's session list only know a session once it has written a file. Without it, a refresh pass could prune the tab of a conversation that had just been started and pull the user back to an older one mid-typing.
 - Failures inside the strip are reported in the strip (`role="status"`), not in the card: a failed tab action must never replace the chat on screen.
 - The keyboard follows the tablist pattern: ←/→/Home/End move the selection and open the tab they land on, and only the active tab is in the tab order.
 
@@ -85,7 +88,7 @@ The per-machine **pointer** lives in `localStorage` under `pi-web-casual:store:v
 | **Reset link** | workspace, session, strip |
 | **Change home** | project, workspace, session, strip (plus the project chooser is shown) |
 | **New chat** | nothing — appends the new session and makes it active |
-| **×** | that one tab (the conversation is archived, not deleted) |
+| **×** | that one tab (the conversation is archived, not deleted; **Undo** restores it) |
 
 `tabs` arrived after the first release, so a record written before the strip existed holds only the remembered session; reads normalize it into a one-tab strip. The active session is always one of the tabs, and the strip is read back through `readCasualTabs`, where a tab's number is its index.
 

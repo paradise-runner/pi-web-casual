@@ -4,6 +4,7 @@ import { acknowledgeCasualUnread } from "./activity.js";
 import {
   activateCasualTab,
   archiveCasualTab,
+  casualArchiveUndo,
   casualChatSrc,
   casualStripNotice,
   changeCasualHome,
@@ -17,6 +18,7 @@ import {
   readCasualTabs,
   refreshCasualPointer,
   resetCasualLink,
+  undoCasualArchive,
   type CasualStatus,
   type CasualTab,
   type OpenContext,
@@ -181,6 +183,19 @@ const newTabStyle = [
   "cursor:pointer",
 ].join(";");
 
+const undoStyle = [
+  "box-sizing:border-box",
+  "flex:0 0 auto",
+  "height:24px",
+  "padding:0 7px",
+  "border:1px solid var(--pi-accent-border)",
+  "border-radius:6px",
+  "background:var(--pi-selection-bg)",
+  "color:var(--pi-text)",
+  "font:600 11px/1 var(--pi-font,system-ui,sans-serif)",
+  "cursor:pointer",
+].join(";");
+
 const noticeStyle = [
   "flex:0 1 auto",
   "min-width:0",
@@ -251,6 +266,7 @@ export function renderPanel(html: HtmlTag, context: ApplicationPanelContext): Te
           open,
           readCasualTabs(context.machine.id),
           casualStripNotice(context.machine.id),
+          casualArchiveUndo(context.machine.id),
         )}
         <iframe
           name=${EMBED_FRAME_NAME}
@@ -300,6 +316,7 @@ function renderStrip(
   open: OpenContext,
   tabs: readonly CasualTab[],
   notice: string | undefined,
+  undo: { readonly message: string } | undefined,
 ): TemplateResult {
   const lastOne = tabs.length <= 1;
   return html`
@@ -343,7 +360,23 @@ function renderStrip(
           `,
         )}
       </div>
-      ${notice === undefined ? null : html`<span style=${noticeStyle} role="status">${notice}</span>`}
+      ${undo === undefined
+        ? notice === undefined
+          ? null
+          : html`<span style=${noticeStyle} role="status">${notice}</span>`
+        : html`
+            <span style=${noticeStyle} role="status">${undo.message}</span>
+            <button
+              type="button"
+              style=${undoStyle}
+              title="Put the archived conversation back"
+              @click=${() => {
+                void undoCasualArchive(open);
+              }}
+            >
+              Undo
+            </button>
+          `}
       <button
         type="button"
         style=${newTabStyle}
