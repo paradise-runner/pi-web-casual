@@ -34,7 +34,7 @@ const plugin = {
             {
                 id: "open",
                 title: "Open Casual Chat",
-                description: "Jump to your one ongoing conversation outside your projects",
+                description: "Open your casual conversations outside your projects",
                 group: "Casual",
                 run: (runtime) => openCasual(runtimeOpenContext(runtime)),
             },
@@ -48,7 +48,7 @@ const plugin = {
             {
                 id: "new",
                 title: "New Casual Chat",
-                description: "Start a fresh conversation in the casual workspace",
+                description: "Start another conversation in the casual workspace and add it to the strip",
                 group: "Casual",
                 run: (runtime) => newCasualChat({
                     ...runtimeOpenContext(runtime),

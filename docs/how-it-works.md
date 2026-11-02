@@ -14,7 +14,10 @@ Casual is a browser-only PI WEB plugin that adds a single long-running conversat
 | Palette actions — *Open Casual Chat*, *Open Casual Chat in Its Own Tab*, *New Casual Chat*, *Set Up Casual Chat* | Actions palette, group "Casual" | [`src/browser/index.ts`](../src/browser/index.ts) |
 | Hidden project row | Sidebar **Projects** list | [`src/browser/dom.ts`](../src/browser/dom.ts) |
 | Tab status color | **Casual** tab icon, desktop and mobile | [`src/browser/activity.ts`](../src/browser/activity.ts), [`dom.ts`](../src/browser/dom.ts) |
+| Unread acknowledgement | Host session routes, when the reply has been read in the tab | [`src/browser/activity.ts`](../src/browser/activity.ts), [`panel.ts`](../src/browser/panel.ts) |
 | Embedded chat | Casual tab, same-origin frame | [`src/browser/panel.ts`](../src/browser/panel.ts) |
+| Conversation strip | Top of the Casual tab: numbered tabs, **+**, **×** | [`src/browser/panel.ts`](../src/browser/panel.ts), [`casual.ts`](../src/browser/casual.ts) |
+| In-place conversation switch | The frame's own history routing | [`src/browser/dom.ts`](../src/browser/dom.ts) |
 
 Everything else is navigation into PI WEB's own screens.
 
@@ -24,8 +27,9 @@ The **Casual** tab's **⁂** carries the same agent signal a project row would h
 
 - The state comes from the host's machine status snapshot, read from `api/machines/<machineId>/status` for every machine that has a pointer, every four seconds while the page is visible. That endpoint is internal, on the same footing as first-run project creation; the public catalog cannot express "unread" and does not exist on `1.202610.3` ([ADR 0010](adr/0010-the-tab-reports-agent-activity.md)).
 - `core:working` and `core:unread` are read from the casual project's node. A project missing from the snapshot has nothing in flight. Any machine working wins over any machine unread.
+- The accent is cleared when the reply has been read, not left on the tab. PI WEB clears an unread completion by itself only for chats whose own document has focus, and the conversation here lives in the panel's embedded frame, so the panel acknowledges the completion through `api/machines/<machineId>/sessions/unread` and `.../unread/acknowledge` when the tab is the surface on screen in a focused page. The acknowledgement echoes the catalog epoch and the completion order it saw, and a host without those routes simply keeps the older coloring.
 - The color reaches the plugin's own icon markup as a custom property (`--pi-web-casual-tab-color`) set on the document root, so no host-owned style or class is rewritten. The tab's `title` and `aria-label` are set for the same states and restored from the host's values, so the signal is not color-only.
-- A snapshot that cannot be read leaves the last state painted; a hidden document does not poll and refreshes on `visibilitychange`.
+- A snapshot that cannot be read leaves the last state painted; a hidden document does not poll and refreshes on `visibilitychange`, and the window regaining focus runs a pass too.
 - The embedded frame returns early, so it costs no extra requests.
 
 ## First run
@@ -41,6 +45,28 @@ If those requests fail, the panel falls back to a setup card where you can add `
 
 The folder lives on the machine that hosts PI WEB, which is why the pointer is stored per machine.
 
+## The conversation strip
+
+Above the frame the panel renders a thin strip of numbered conversations ([`panel.ts`](../src/browser/panel.ts)): `role="tablist"`, one `role="tab"` button per conversation, the active tab's **×**, and a **+** pinned right.
+
+- Numbers are positions in the stored strip, oldest first. **+** appends and activates; **×** archives and activates the neighbour.
+- The **+** does not navigate the host page and does not depend on the sidebar. It starts a session through the same session route first run uses ([`bootstrap.ts`](../src/browser/bootstrap.ts)), then records it as the active tab, so the panel only re-renders.
+- The **×** calls the host's session lifecycle route, `api/machines/<machineId>/plugin-sessions/projects/<projectId>/workspaces/<workspaceId>/sessions/<sessionId>/archive`. That is the route behind PI WEB's own archive action, so the conversation moves to the host's **Archived** sessions and stays restorable; the plugin still has no delete of its own. A conversation that was started and never written to disk has no session file to archive, so its tab is dropped and nothing is reported. A host without the route leaves the conversation alone, and the strip says so.
+- Failures inside the strip are reported in the strip (`role="status"`), not in the card: a failed tab action must never replace the chat on screen.
+- The keyboard follows the tablist pattern: ←/→/Home/End move the selection and open the tab they land on, and only the active tab is in the tab order.
+
+## Switching conversations without reloading
+
+`switchEmbeddedChat` ([`dom.ts`](../src/browser/dom.ts)) points the mounted frame at another conversation instead of recreating it:
+
+1. `frame.contentWindow.history.pushState` to the conversation's route, then a synthetic `popstate` — the same events the host's own router consumes. Measured: the frame's document survives and its selection changes, so there is no SPA boot, no second daemon connection, and the transcript scroll position belongs to the conversation you return to.
+2. The result is verified through the host's own selected-session marker (`[data-session-id].selected` in the frame's session list), which changes as soon as the route does — unlike the transcript, which takes as long as it takes to load.
+3. If the host did not act on the event, the frame's `src` is set instead, so the tab still switches after one page load.
+
+This is private host behavior on the same footing as the chrome trimming (ADR 0005). A host that stops routing on `popstate` costs a reload per switch, not a broken tab.
+
+Because the template keeps the `src` the frame was mounted with, a host re-render never reloads the embedded chat; the panel reads the frame's own URL to decide whether a switch is needed.
+
 ## Finding the conversation
 
 Two discovery paths, chosen by host version ([`src/browser/casual.ts`](../src/browser/casual.ts)):
@@ -52,13 +78,16 @@ If a new session can't be created at all, the panel shows an error card explaini
 
 ## Remembered state
 
-The per-machine **pointer** lives in `localStorage` under `pi-web-casual:store:v2` ([`src/browser/store.ts`](../src/browser/store.ts)) and holds the project, workspace, and session.
+The per-machine **pointer** lives in `localStorage` under `pi-web-casual:store:v2` ([`src/browser/store.ts`](../src/browser/store.ts)) and holds the project, workspace, the conversation strip, and the active conversation.
 
 | Control | Fields cleared |
 | --- | --- |
-| **Reset link** | workspace, session |
-| **Change home** | project, workspace, session (plus the project chooser is shown) |
-| **New chat** | nothing — replaces the session after creating a new one |
+| **Reset link** | workspace, session, strip |
+| **Change home** | project, workspace, session, strip (plus the project chooser is shown) |
+| **New chat** | nothing — appends the new session and makes it active |
+| **×** | that one tab (the conversation is archived, not deleted) |
+
+`tabs` arrived after the first release, so a record written before the strip existed holds only the remembered session; reads normalize it into a one-tab strip. The active session is always one of the tabs, and the strip is read back through `readCasualTabs`, where a tab's number is its index.
 
 Conversation content is never stored by the plugin; it belongs to PI WEB.
 
@@ -75,6 +104,7 @@ The Casual tab is an application panel, and PI WEB exposes no transcript compone
 - `superviseEmbeddedChat` runs on a 300 ms pass for the life of the frame, plus once per `load`. One pass is not enough: the frame is its own SPA, so `chat-view` only exists after it boots, and Lit can recreate shell nodes after that.
 - Each pass injects a persistent stylesheet into the frame's `pi-web-app` shadow root hiding `app-context-bar`, `app-mobile-main-tabs`, `app-navigation-panel`, `workspace-panel`, `status-bar`, and `navigation`, collapsing the shell grid to the one chat column so no empty tracks remain, then hides the sibling branches above `chat-view` with inline styles. Persistent CSS handles chrome that is always present; the inline pass handles the plain header and any wrapper that only exists in some layouts.
 - The frame fills the panel's flex area (`height: 100%`) instead of subtracting a viewport offset, so the embedded composer sits on the panel's bottom edge at any window height.
+- Inside the frame the app is pinned to the frame's own viewport (`position: fixed; inset: 0`) with no safe-area padding of its own. As a top-level page the app measures itself against the browser window — `100dvh`, plus the home-indicator inset in an installed app — and both are already applied by the page around the frame. Left to itself the embedded copy padded the composer a second time for the home indicator, so on a phone the chat sat above the panel's bottom edge with a dead strip under it; the pin also keeps the composer in place when a frame's `dvh` is stale during an address-bar or keyboard change.
 - The walk starts at the lowest common ancestor of `chat-view` and `prompt-editor`, and only siblings of that branch are hidden. The transcript's own ancestors are never touched, so this code cannot hide the chat — which is why there is no rollback path.
 - Supervision stops when the frame is disconnected or after five minutes, whichever comes first.
 - `refreshCasualPointer` resolves the home through the catalog and re-patches the casual fields without navigating, so the frame follows the newest live session and a stale pointer cannot embed a route the host rejects.
@@ -107,7 +137,7 @@ PI WEB exposes no contribution point for hiding a project row, for a status colo
 
 Browser API **v4**, so Casual runs on PI WEB `1.202610.3` and `1.202610.6+`. PI WEB `1.202610.6+` logs a deprecation warning for every API-v4 plugin, including its own bundled plugins; moving to API v5 would drop `1.202610.3` support. There is no server entry, no Pi extension, no analytics, and no third-party service.
 
-The plugin talks to two host routes it does not own: `api/machines/<machineId>/projects` (and workspaces, trust, sessions) on first run ([ADR 0003](adr/0003-browser-only-bootstrap-through-host-endpoints.md)), and `api/machines/<machineId>/status` for the tab's tint ([ADR 0010](adr/0010-the-tab-reports-agent-activity.md)). Both are same-origin and both fail soft: first run falls back to the setup card, and the tint keeps its last state. The status flags (`core:working`, `core:unread`) have existed at project level since PI WEB `1.202608.1`, which is older than the plugin's floor.
+The plugin talks to host routes it does not own: `api/machines/<machineId>/projects` (and workspaces, trust, sessions) on first run ([ADR 0003](adr/0003-browser-only-bootstrap-through-host-endpoints.md)), `api/machines/<machineId>/status` for the tab's tint, and the unread catalog with its acknowledgement when a finished reply has been read ([ADR 0010](adr/0010-the-tab-reports-agent-activity.md)). All are same-origin and all fail soft: first run falls back to the setup card, the tint keeps its last state, and an unread completion stays unread. The status flags (`core:working`, `core:unread`) have existed at project level since PI WEB `1.202608.1`, which is older than the plugin's floor.
 
 The floor is enforced at activation, not at install: PI WEB's manifest has no host-version field, so it is the earliest point the plugin runs. `activate` throws when the host does not expose the browser selection service, which also catches `1.202610.1` — that release accepts `apiVersion: 4` but has no application panels, selection service, or project discovery, so the tab could never render. The host reports the throw as `Failed to register PI WEB plugin pi-web-casual during activate`, and none of the palette actions are registered.
 
@@ -119,7 +149,7 @@ The floor is enforced at activation, not at install: PI WEB's manifest has no ho
 | `src/browser/casual.ts` | Project/workspace/session resolution, open/new flows, separate window, embedded-chat source |
 | `src/browser/bootstrap.ts` | First-run project creation, trust, session creation, one-time reload |
 | `src/browser/panel.ts` | Casual panel UI and card |
-| `src/browser/activity.ts` | Agent state for the Casual tab, read from the host status snapshot |
+| `src/browser/activity.ts` | Agent state for the Casual tab, read from the host status snapshot, plus the unread acknowledgement |
 | `src/browser/dom.ts` | Host shadow-DOM bridge, hidden project row, tab status, embedded-frame supervision |
 | `src/browser/store.ts` | Per-machine remembered state |
 | `src/browser/types.ts` | Optional catalog contract used on newer hosts, plus the status fields the tab reads |

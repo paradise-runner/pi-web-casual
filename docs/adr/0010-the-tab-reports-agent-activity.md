@@ -4,11 +4,19 @@ Casual hides its home from the **Projects** sidebar (ADR 0005), so the signal ev
 
 The state comes from PI WEB's own machine status snapshot, not from the panel. The public plugin API exposes no status reads: the v5 **catalog** reports a session's `runtime` as `busy` or `idle` only, it cannot say "finished and unread", and it does not exist on `1.202610.3` (ADR 0004). The snapshot behind the sidebar's dots has both flags at project level and predates the plugin's oldest supported host, so the plugin reads `api/machines/<machineId>/status` — the same same-origin, best-effort footing as first-run project creation (ADR 0003) — and polls it every four seconds while the page is visible.
 
+## Clearing the completion
+
+The accent has to come off the tab once the reply has been read, and that turned out to be the plugin's job too. PI WEB acknowledges an unread completion itself, but only for a chat it can see: its own `chat-view` on screen, in a focused, visible document. The casual conversation renders inside the panel's embedded frame ([ADR 0008](0008-panel-embeds-the-chat-in-a-same-origin-frame.md)), and the frame's document is never the one that has focus while the user works in the host's chrome, so the host never saw the reply as read and the accent stayed on the tab after the visit.
+
+So the plugin reports the same condition from the outside: the Casual panel is the workspace surface the host is showing — its embedded chat frame is in layout, or the panel is rendering that conversation while the workspace panel itself occupies layout — in a visible, focused page. A panel the host has covered with the chat view or collapsed is not a visit. The completion is then acknowledged through the host's own routes: `api/machines/<machineId>/sessions/unread` for the catalog, then `.../unread/acknowledge` with the catalog epoch and the completion order it observed. That is the same pair the host's browser uses, and echoing the observed order means a late acknowledgement can never clear newer work. The colour is then repainted from the status snapshot instead of being cleared optimistically, so a session still working in the home stays green.
+
 ## Consequences
 
 - Working is green (`--pi-success`), an unread completion is accent (`--pi-accent`), and nothing in flight leaves the glyph untinted, so the tab reads at rest exactly as it did before.
 - The tab is right even when the panel has never rendered, because the plugin polls rather than asking the panel what it last saw.
 - Status can be up to four seconds stale, and a hidden document does not poll at all; `visibilitychange` refreshes immediately. Color alone would be an accessibility gap, so the tab's `title` and `aria-label` (`Casual, agent working`, `Casual, reply unread`) carry the same state and are restored from the host's own values when nothing is in flight.
+- The accent clears as soon as the reply has been read in the tab, so switching away shows the resting glyph; a tab that is only mounted but covered by the chat view on a narrow layout is not treated as a visit.
+- An acknowledgement is attempted at most once every three seconds per conversation, and only while the tab is carrying an unread completion, so the extra requests are rare. A host older than the unread catalog answers `404` and the tab keeps the old behaviour, reads included.
 - `working` is a project roll-up: any session in the home that is busy lights the tab, including a sibling started by **New chat**. That matches what the hidden project row would have shown.
 - If the endpoint is unreachable or the snapshot has no `projects` field, the tab keeps the last state it painted instead of guessing. A PI WEB release that moves the endpoint leaves the plugin working, only without the color.
 - The state is one color for the plugin, not one per machine: a browser with pointers on two machines shows the strongest state across them, since both tabs share the `Casual` label.

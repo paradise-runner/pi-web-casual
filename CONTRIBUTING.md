@@ -44,6 +44,12 @@ Then reload the browser. No session-daemon restart is needed for this plugin.
 - Expanding and collapsing **Projects** (and redrawing the sidebar) never paints the Casual row; a cold page load may show it only until the plugin has loaded.
 - The Casual tab's **⁂** turns green while the casual chat is working and accent while a finished reply is unread, with a matching tooltip and accessible name, and returns to no tint when nothing is in flight.
 - The Casual tab embeds the chat once a session is remembered, with the frame's navigation and header hidden; the composer stays usable and sending a message round-trips.
+- The embedded chat reaches the panel's bottom edge on a phone in a normal browser tab and in the installed app, with no dead strip under the composer, and a reply still scrolls into view after the keyboard or address bar changes the viewport height.
+- **+** in the strip adds a conversation and opens it without reloading the page (the chat keeps running, and switching back does not boot it again); numbers append and keep their order.
+- **×** on the active conversation archives it, the next tab becomes active, and the conversation appears in PI WEB's **Archived** sessions where it can be restored; the last remaining tab has no **×**.
+- ←/→/Home/End move between conversations and open the tab they land on.
+- A conversation that was started and never used drops its tab on **×** without an error message.
+- Reloading with several conversations keeps the strip, keeps the active one, drops tabs whose conversation was archived elsewhere, and does not reload the chat when switching.
 - The embedded state renders the chat alone: no card, header, or toolbar above or below it, and every control is reachable from the palette.
 - When the embedded frame cannot be trimmed into a usable chat, it falls back to a full app and **Open chat** still gives a full view.
 - **Open in its own tab** on the card and **Open Casual Chat in Its Own Tab** in the palette do the same from anywhere, falling back to the current tab when a popup blocker intervenes or no casual session exists yet.
