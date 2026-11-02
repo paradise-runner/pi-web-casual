@@ -177,8 +177,7 @@ export async function bootstrapCasual(machineId: string): Promise<BootstrapResul
  *
  * `missing` is the conversation the host never wrote to disk — a session that was
  * started and never used — which has nothing to archive and nothing to lose.
- */
-export async function archiveCasualSession(
+ */export async function archiveCasualSession(
   machineId: string,
   selection: { projectId: string; workspaceId: string; sessionId: string },
 ): Promise<"archived" | "unsupported" | "missing" | "failed"> {
@@ -199,6 +198,27 @@ export async function archiveCasualSession(
   } catch (error) {
     console.warn("[pi-web-casual] archive failed", error);
     return "failed";
+  }
+}
+
+/** Bring an archived session back, the reverse of {@link archiveCasualSession}. */
+export async function restoreCasualSession(
+  machineId: string,
+  selection: { projectId: string; workspaceId: string; sessionId: string },
+): Promise<boolean> {
+  const base = `api/machines/${encodeURIComponent(machineId)}/plugin-sessions`;
+  const url =
+    `${base}/projects/${encodeURIComponent(selection.projectId)}` +
+    `/workspaces/${encodeURIComponent(selection.workspaceId)}` +
+    `/sessions/${encodeURIComponent(selection.sessionId)}/restore`;
+  try {
+    const response = await fetch(url, { method: "POST", credentials: "same-origin" });
+    if (response.ok) return true;
+    console.warn(`[pi-web-casual] restore failed: ${response.status}`);
+    return false;
+  } catch (error) {
+    console.warn("[pi-web-casual] restore failed", error);
+    return false;
   }
 }
 

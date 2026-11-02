@@ -102,8 +102,10 @@ export function patchRecord(machineId: string, patch: Partial<CasualRecord>): Ca
   // existed materializes its tab list instead of losing it the first time the
   // active conversation changes.
   const current = normalizeRecord(store.machines[machineId]);
-  const next: CasualRecord = { ...current, ...patch };
+  // Normalize again after the patch: making a conversation active also puts it in
+  // the strip, and that has to reach storage, not just the object returned here.
+  const next = normalizeRecord({ ...current, ...patch });
   store.machines[machineId] = next;
   writeStore(store);
-  return normalizeRecord(next);
+  return next;
 }
