@@ -8,3 +8,4 @@ PI WEB models work as projects containing workspaces and sessions. The conversat
 - "A new conversation" means a new session in the same home, not a new space.
 - Topics, folders, pins, and per-topic homes are out of scope.
 - Deletion stays with PI WEB in **Sessions**; the plugin never removes history.
+- Narrowed by ADR 0011: the home still holds one kind of conversation, but a numbered strip keeps several of them within reach. The options are conversations in one home, never topics, folders, or per-conversation homes.

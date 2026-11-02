@@ -6,16 +6,24 @@ A PI WEB plugin that gives one long-running, project-free conversation a home ou
 
 ### Objects
 
-**Casual chat**:
-The one PI WEB session Casual reopens by default. A normal session in the home project, with no special storage.
-_Avoid_: channel, thread, assistant
+**Casual conversations**:
+The hand­ful of PI WEB sessions Casual keeps in a numbered **strip**, one of them active at a time. All of them live in the home; none of them is a project.
+_Avoid_: channel, thread, assistant, workspace
+
+**Tab**:
+One numbered entry in the **strip**. Its number is its position, and clicking it makes that conversation the active one.
+_Avoid_: pin, slot, page
+
+**Strip**:
+The thin row at the top of the Casual tab holding the numbered tabs, the active tab's **×**, and the **+**.
+_Avoid_: toolbar, header, tab bar
 
 **Home**:
 The PI WEB project named `Casual` at `~/.casual-pi-web`, created and trusted on first run. Casual keeps the project; the user never picks a workspace.
 _Avoid_: folder, workspace, scratch repo
 
 **Pointer**:
-The remembered project, workspace, and session in `localStorage` under `pi-web-casual:store:v2`, stored per machine.
+The remembered project, workspace, conversation strip, and active conversation in `localStorage` under `pi-web-casual:store:v2`, stored per machine.
 _Avoid_: config, state, cache
 
 **Card**:
@@ -41,8 +49,12 @@ The chat the Casual tab shows in place: a same-origin frame pointed at the casua
 _Avoid_: preview, mini app, iframe view
 
 **New chat**:
-Create another session in the home and make it the remembered one. Previous sessions are untouched.
+Create another session in the home, append it to the strip, and make it the active tab. Previous conversations are untouched.
 _Avoid_: reset, restart, clear
+
+**Archive a conversation**:
+What the **×** on the active tab does: PI WEB's own archive action, so the conversation moves to the host's **Archived** sessions and can be restored there. Casual never deletes.
+_Avoid_: close, delete, remove
 
 **Reset link**:
 Clear the remembered workspace and session but keep the home, then open again so the newest live session is chosen.

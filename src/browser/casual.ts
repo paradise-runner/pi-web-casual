@@ -7,9 +7,9 @@ import type {
   PluginSelectedSession,
   PluginSelectionService,
 } from "@jmfederico/pi-web/plugin-api";
-import { bootstrapCasual, casualChatUrl, reloadToCasualChat, reloadToCasualPanel } from "./bootstrap.js";
+import { bootstrapCasual, casualChatUrl, listHomeSessions, reloadToCasualChat, reloadToCasualPanel, startCasualSession, archiveCasualSession } from "./bootstrap.js";
 import { clickCasualTab, clickStartSession, waitFor } from "./dom.js";
-import { patchRecord, readRecord, type CasualRecord } from "./store.js";
+import { patchRecord, readRecord, type CasualRecord, type CasualTabRecord } from "./store.js";
 import type { CatalogSession, CatalogWorkspace, PluginCatalog } from "./types.js";
 
 export interface CasualSession {
@@ -31,6 +31,15 @@ export interface OpenContext {
 
 export type CasualStatusKind = "idle" | "opening" | "ready" | "setup" | "error";
 
+/** One numbered conversation in the Casual strip. */
+export interface CasualTab {
+  readonly sessionId: string;
+  /** 1-based position in the strip, the number the tab shows. */
+  readonly number: number;
+  readonly name?: string;
+  readonly active: boolean;
+}
+
 export interface CasualStatus {
   readonly kind: CasualStatusKind;
   readonly message?: string;
@@ -40,6 +49,13 @@ export interface CasualStatus {
 }
 
 const statuses = new Map<string, CasualStatus>();
+/**
+ * A short-lived line for the strip when a strip action could not complete. The
+ * card is for the conversation as a whole; a failed tab action must not replace
+ * the chat that is on screen.
+ */
+const stripNotices = new Map<string, string>();
+const stripNoticeTimers = new Map<string, number>();
 const openTasks = new Map<string, Promise<void>>();
 const newTasks = new Map<string, Promise<void>>();
 const chooserMachines = new Set<string>();
@@ -53,6 +69,123 @@ export function setSelectionService(service: PluginSelectionService | undefined)
 
 export function getStatus(machineId: string): CasualStatus {
   return statuses.get(machineId) ?? { kind: "idle" };
+}
+
+/** The strip for one machine, numbered by position, with the active one marked. */
+export function readCasualTabs(machineId: string): readonly CasualTab[] {
+  const record = readRecord(machineId);
+  return (record.tabs ?? []).map((tab, index) => ({
+    sessionId: tab.sessionId,
+    number: index + 1,
+    ...(tab.sessionName === undefined ? {} : { name: tab.sessionName }),
+    active: tab.sessionId === record.sessionId,
+  }));
+}
+
+/** The line the strip shows when a tab action could not complete. */
+export function casualStripNotice(machineId: string): string | undefined {
+  return stripNotices.get(machineId);
+}
+
+function setStripNotice(context: OpenContext, message: string | undefined): void {
+  const pending = stripNoticeTimers.get(context.machineId);
+  if (pending !== undefined) window.clearTimeout(pending);
+  stripNoticeTimers.delete(context.machineId);
+  if (message === undefined) {
+    stripNotices.delete(context.machineId);
+  } else {
+    stripNotices.set(context.machineId, message);
+    stripNoticeTimers.set(
+      context.machineId,
+      window.setTimeout(() => {
+        stripNoticeTimers.delete(context.machineId);
+        stripNotices.delete(context.machineId);
+        context.requestRender?.();
+      }, 6000),
+    );
+  }
+  context.requestRender?.();
+}
+
+/** Show an existing conversation in the panel without navigating anywhere. */
+export function activateCasualTab(context: OpenContext, sessionId: string): void {
+  const record = readRecord(context.machineId);
+  if (record.sessionId === sessionId) return;
+  const tab = (record.tabs ?? []).find((candidate) => candidate.sessionId === sessionId);
+  if (tab === undefined) return;
+  setStripNotice(context, undefined);
+  patchRecord(context.machineId, { sessionId: tab.sessionId, sessionName: tab.sessionName });
+  context.requestRender?.();
+}
+
+/**
+ * The strip's **+**: start another conversation in the same home and make it the
+ * active tab. This deliberately does not navigate the host page. The session is
+ * created through the same route first run uses, so it works on every supported
+ * host instead of depending on the sidebar's **+** button.
+ */
+export async function newCasualTab(context: OpenContext): Promise<void> {
+  const record = readRecord(context.machineId);
+  const cwd = record.workspacePath ?? record.projectPath;
+  if (cwd === undefined) return;
+  const created = await startCasualSession(context.machineId, cwd);
+  if (created === undefined) {
+    setStripNotice(context, "Could not start a new conversation.");
+    return;
+  }
+  patchRecord(context.machineId, { sessionId: created.id, sessionName: created.name });
+  setStripNotice(context, undefined);
+  context.requestRender?.();
+}
+
+/**
+ * The strip's **×**: archive the conversation and drop its tab. Archiving is the
+ * host's own session action, so the conversation keeps its place in PI WEB's
+ * **Archived** sessions and can be restored there. The last tab stays: Casual is
+ * never left without a conversation to show.
+ */
+export async function archiveCasualTab(context: OpenContext, sessionId: string): Promise<void> {
+  const record = readRecord(context.machineId);
+  const tabs = record.tabs ?? [];
+  const index = tabs.findIndex((tab) => tab.sessionId === sessionId);
+  if (index < 0) return;
+  if (tabs.length <= 1) {
+    setStripNotice(context, "Casual keeps one conversation.");
+    return;
+  }
+  if (record.projectId === undefined || record.workspaceId === undefined) return;
+
+  const result = await archiveCasualSession(context.machineId, {
+    projectId: record.projectId,
+    workspaceId: record.workspaceId,
+    sessionId,
+  });
+  if (result === "failed") {
+    // A conversation the host's own list does not know was never persisted, so
+    // there is nothing to keep and nothing worth reporting.
+    const cwd = record.workspacePath ?? record.projectPath;
+    const known = cwd === undefined ? undefined : await listHomeSessions(context.machineId, cwd);
+    if (known === undefined || known.some((session) => session.id === sessionId)) {
+      setStripNotice(context, "Could not archive that conversation.");
+      return;
+    }
+  }
+
+  const remaining = tabs.filter((tab) => tab.sessionId !== sessionId);
+  const neighbour = remaining[Math.min(index, remaining.length - 1)];
+  patchRecord(context.machineId, {
+    tabs: remaining,
+    ...(record.sessionId !== sessionId || neighbour === undefined
+      ? {}
+      : { sessionId: neighbour.sessionId, sessionName: neighbour.sessionName }),
+  });
+  setStripNotice(
+    context,
+    result === "unsupported"
+      ? "Archiving needs a newer PI WEB; the conversation stays in Sessions."
+      : undefined,
+  );
+  context.requestRender?.();
 }
 
 function setStatus(context: OpenContext, status: CasualStatus): void {
@@ -126,6 +259,7 @@ export function resetCasualLink(context: OpenContext): Promise<void> {
     workspacePath: undefined,
     sessionId: undefined,
     sessionName: undefined,
+    tabs: [],
   });
   return openCasual(context);
 }
@@ -139,6 +273,7 @@ export function changeCasualHome(context: OpenContext): Promise<void> {
     workspacePath: undefined,
     sessionId: undefined,
     sessionName: undefined,
+    tabs: [],
   });
   chooserMachines.add(context.machineId);
   return openCasual(context);
@@ -157,6 +292,8 @@ interface CasualTarget {
   readonly project: PluginProject;
   readonly workspace?: CatalogWorkspace;
   readonly session?: CasualSession;
+  /** Live sessions in the home, newest first; absent when no catalog answered. */
+  readonly sessions?: readonly CasualSession[];
 }
 
 async function resolveCasualTarget(context: OpenContext): Promise<CasualTarget | undefined> {
@@ -171,6 +308,7 @@ async function resolveCasualTarget(context: OpenContext): Promise<CasualTarget |
     project,
     ...(workspace === undefined ? {} : { workspace }),
     ...(session === undefined ? {} : { session }),
+    ...(discovered.sessions === undefined ? {} : { sessions: discovered.sessions }),
   };
 }
 
@@ -183,28 +321,88 @@ export function casualChatSrc(context: OpenContext): string | undefined {
 
 const pointerRefreshes = new Map<string, string>();
 
+/** Live sessions for the home from the host's list route, for hosts without a catalog. */
+async function homeSessions(
+  context: OpenContext,
+  record: CasualRecord,
+): Promise<readonly CatalogSession[] | undefined> {
+  const cwd = record.workspacePath ?? record.projectPath;
+  if (cwd === undefined) return undefined;
+  const sessions = await listHomeSessions(context.machineId, cwd);
+  if (sessions === undefined) return undefined;
+  return sessions
+    .filter((session) => !session.archived)
+    .map((session) => ({
+      id: session.id,
+      cwd,
+      ...(session.name === undefined ? {} : { name: session.name }),
+      archived: false,
+      runtime: "not-hosted" as const,
+    }));
+}
+
 /**
- * Keep the remembered pointer in step with the newest live casual session
- * without navigating, so the embedded chat opens the same conversation that
- * Open chat would. The key guard stops a patch/render loop.
+ * Keep the pointer and the strip in step with the home without navigating: drop
+ * tabs whose conversation was archived or deleted elsewhere, name the ones the
+ * catalog knows, and repoint when the active conversation is gone. The key guard
+ * stops a patch/render loop.
  */
 export async function refreshCasualPointer(context: OpenContext): Promise<void> {
   const record = readRecord(context.machineId);
   if (record.sessionId === undefined) return;
-  const key = `${record.projectId ?? ""}\u0000${record.workspaceId ?? ""}\u0000${record.sessionId}`;
+  const key = [
+    record.projectId ?? "",
+    record.workspaceId ?? "",
+    record.sessionId,
+    (record.tabs ?? []).map((tab) => tab.sessionId).join(","),
+  ].join("\u0000");
   if (pointerRefreshes.get(context.machineId) === key) return;
   pointerRefreshes.set(context.machineId, key);
 
   const target = await resolveCasualTarget(context);
-  if (target?.session === undefined) return;
+  if (target === undefined) return;
   const latest = readRecord(context.machineId);
-  const unchanged =
-    latest.projectId === target.project.id &&
-    latest.workspaceId === target.workspace?.id &&
-    latest.sessionId === target.session.id;
-  if (unchanged) return;
-  rememberLocation(context, target.project, target.workspace);
-  rememberSession(context, target.session);
+  // The catalog answers on newer hosts; the host's own session list answers for
+  // naming and pruning on older ones. Only the catalog may move the active
+  // conversation, because only it knows which sessions are live.
+  const authoritative = target.sessions !== undefined;
+  const live = target.sessions ?? (await homeSessions(context, latest));
+  const tabs = latest.tabs ?? [];
+  const nextTabs =
+    live === undefined
+      ? tabs
+      : tabs
+          .filter((tab) => live.some((session) => session.id === tab.sessionId))
+          .map((tab) => {
+            const match = live.find((session) => session.id === tab.sessionId);
+            return match?.name === undefined || match.name === tab.sessionName
+              ? tab
+              : { sessionId: tab.sessionId, sessionName: match.name };
+          });
+  const session = target.session;
+  // Discovery prefers the remembered conversation when it is still live, so a
+  // different id means the active one was archived or deleted elsewhere.
+  const nextSession =
+    authoritative && session !== undefined && session.id !== latest.sessionId
+      ? session
+      : undefined;
+  const tabsChanged =
+    nextTabs.length !== tabs.length ||
+    nextTabs.some(
+      (tab, index) =>
+        tab.sessionId !== tabs[index]?.sessionId || tab.sessionName !== tabs[index]?.sessionName,
+    );
+  const locationChanged =
+    latest.projectId !== target.project.id || latest.workspaceId !== target.workspace?.id;
+  if (!tabsChanged && nextSession === undefined && !locationChanged) return;
+
+  if (locationChanged) rememberLocation(context, target.project, target.workspace);
+  patchRecord(context.machineId, {
+    ...(tabsChanged ? { tabs: nextTabs } : {}),
+    ...(nextSession === undefined
+      ? {}
+      : { sessionId: nextSession.id, sessionName: nextSession.name }),
+  });
   context.requestRender?.();
 }
 
@@ -370,6 +568,7 @@ async function bootstrapAndReload(context: OpenContext): Promise<boolean> {
     workspacePath: result.workspacePath,
     sessionId: result.sessionId,
     sessionName: undefined,
+    tabs: [],
   });
 
   // Let the panel paint the "Creating..." state before the one-time reload.
@@ -416,6 +615,8 @@ async function listProjects(context: OpenContext): Promise<readonly PluginProjec
 interface Discovered {
   readonly workspace?: CatalogWorkspace;
   readonly session?: CatalogSession;
+  /** Every live session in the home, newest first; absent when no catalog answered. */
+  readonly sessions?: readonly CatalogSession[];
   /** True when the catalog was read successfully, even if it found nothing. */
   readonly authoritative: boolean;
 }
@@ -442,6 +643,7 @@ async function discover(
     return {
       workspace,
       ...(session === undefined ? {} : { session }),
+      sessions: live,
       authoritative: true,
     };
   } catch (error) {

@@ -181,6 +181,73 @@ export function setCasualHostActivity(activity) {
     hostActivity = activity;
     applyCasualActivity(activity);
 }
+/** The state last painted on the tab; used to skip work when nothing is unread. */
+export function getCasualHostActivity() {
+    return hostActivity;
+}
+/**
+ * True when PI WEB is showing the workspace panel that hosts the Casual tab. A
+ * rendered panel is not proof the conversation is on screen: on a narrow layout
+ * the host keeps the workspace panel mounted while the chat view covers it, and
+ * takes it out of layout when it collapses it.
+ */
+export function isCasualPanelOnScreen() {
+    const app = appShadowRoot();
+    if (app === undefined)
+        return false;
+    for (const panel of app.querySelectorAll("workspace-panel")) {
+        const rect = panel.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0)
+            return true;
+    }
+    return false;
+}
+/**
+ * The casual conversation PI WEB is actually showing, if any.
+ *
+ * The embedded frame is the proof: it exists only while the panel has rendered
+ * the chat, its `src` carries the machine and session the panel loaded, and a
+ * frame the host has covered or collapsed occupies no layout. Reading the frame
+ * rather than the panel's render keeps "on screen" honest on a narrow layout,
+ * where the workspace panel stays mounted underneath the chat view.
+ */
+export function casualChatOnScreen() {
+    const app = appShadowRoot();
+    if (app === undefined)
+        return undefined;
+    for (const panel of app.querySelectorAll("workspace-panel")) {
+        const frame = panel.shadowRoot?.querySelector(`iframe[name="${EMBED_FRAME_NAME}"]`);
+        if (frame === null || frame === undefined)
+            continue;
+        const rect = frame.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0)
+            continue;
+        const target = parseCasualChatUrl(frame.src);
+        if (target !== undefined)
+            return target;
+    }
+    return undefined;
+}
+/** Pull the machine and session out of the route URL the panel embedded. */
+function parseCasualChatUrl(src) {
+    if (src === "")
+        return undefined;
+    let url;
+    try {
+        url = new URL(src, window.location.href);
+    }
+    catch {
+        return undefined;
+    }
+    const sessionId = url.searchParams.get("session");
+    if (sessionId === null || sessionId === "")
+        return undefined;
+    const machineId = url.searchParams.get("machine");
+    return {
+        machineId: machineId === null || machineId === "" ? "local" : machineId,
+        sessionId,
+    };
+}
 function applyCasualActivity(activity) {
     const root = document.documentElement;
     const style = root.style;
@@ -341,6 +408,138 @@ export function startCasualHostBridge(signal) {
         }
     }, { once: true });
 }
+/** The embedded chat frame, mounted or not, so tab switches reach a hidden panel too. */
+export function findCasualFrame() {
+    const app = appShadowRoot();
+    if (app === undefined)
+        return null;
+    for (const panel of app.querySelectorAll("workspace-panel")) {
+        const frame = panel.shadowRoot?.querySelector(`iframe[name="${EMBED_FRAME_NAME}"]`);
+        if (frame !== null && frame !== undefined)
+            return frame;
+    }
+    return null;
+}
+/** The conversation the frame currently has open, read from its own URL. */
+export function embeddedChatSession(frame) {
+    try {
+        const url = new URL(frame.contentWindow?.location.href ?? frame.src, window.location.href);
+        return url.searchParams.get("session") ?? undefined;
+    }
+    catch {
+        return undefined;
+    }
+}
+/** A cheap sample of what the embedded chat is showing, to detect a real switch. */
+function embeddedChatSample(frame) {
+    try {
+        const root = embedFrameRoot(frame);
+        const text = root?.querySelector("chat-view")?.textContent ?? "";
+        return `${text.length}:${text.slice(-80)}`;
+    }
+    catch {
+        return undefined;
+    }
+}
+/**
+ * The session the frame's own app has selected, read from its session list.
+ *
+ * The host marks the selected row, which changes as soon as the route does —
+ * unlike the transcript, which takes as long as it takes to load — so this is
+ * the signal that says whether a synthetic navigation was acted on.
+ */
+function embeddedSelectedSession(frame) {
+    let root = null;
+    try {
+        root = embedFrameRoot(frame);
+    }
+    catch {
+        return undefined;
+    }
+    if (root === null)
+        return undefined;
+    const find = (scope) => {
+        if (scope === null)
+            return undefined;
+        for (const row of scope.querySelectorAll("[data-session-id]")) {
+            if (!row.classList.contains("selected"))
+                continue;
+            const id = row.getAttribute("data-session-id");
+            if (id !== null && id !== "")
+                return id;
+        }
+        for (const element of scope.querySelectorAll("*")) {
+            if (element.shadowRoot === null)
+                continue;
+            const found = find(element.shadowRoot);
+            if (found !== undefined)
+                return found;
+        }
+        return undefined;
+    };
+    const nav = root.querySelector("app-navigation-panel");
+    return find(nav?.shadowRoot ?? null) ?? find(root);
+}
+/** Last switch issued per frame, so a slow verification cannot act on an old one. */
+const switchTokens = new WeakMap();
+/**
+ * Point the embedded chat at another conversation without rebooting it.
+ *
+ * PI WEB routes its own document on `popstate`, and the frame is same-origin, so
+ * a `pushState` plus a synthetic event swaps the conversation in place —
+ * measured, the frame's document survives and its selection changes. That is
+ * private behavior on the same footing as the chrome trimming (ADR 0005), so it
+ * is verified through the host's own selected-session marker; when the host did
+ * not act on the event, the frame is reloaded and the tab still switches, one
+ * conversation per page load.
+ */
+export function switchEmbeddedChat(frame, url) {
+    const target = new URL(url, window.location.href);
+    const session = target.searchParams.get("session") ?? undefined;
+    const token = (switchTokens.get(frame) ?? 0) + 1;
+    switchTokens.set(frame, token);
+    const before = embeddedChatSample(frame);
+    try {
+        const win = frame.contentWindow;
+        if (win === null || win.location.origin !== window.location.origin) {
+            frame.src = url;
+            return;
+        }
+        win.history.pushState({}, "", target.toString());
+        win.dispatchEvent(new PopStateEvent("popstate", { state: {} }));
+    }
+    catch (error) {
+        console.warn("[pi-web-casual] could not route the embedded chat", error);
+        frame.src = url;
+        return;
+    }
+    const started = Date.now();
+    const verify = () => {
+        if (!frame.isConnected)
+            return;
+        if (switchTokens.get(frame) !== token)
+            return;
+        const selected = embeddedSelectedSession(frame);
+        if (selected !== undefined && selected !== "") {
+            if (selected === session)
+                return;
+            if (Date.now() - started > 1500)
+                frame.src = url;
+            else
+                window.setTimeout(verify, 150);
+            return;
+        }
+        // A host whose session list is not rendered cannot be asked directly; fall
+        // back to whether the chat on screen changed at all.
+        if (embeddedChatSample(frame) !== before)
+            return;
+        if (Date.now() - started > 2500)
+            frame.src = url;
+        else
+            window.setTimeout(verify, 200);
+    };
+    window.setTimeout(verify, 120);
+}
 /**
  * Turn a same-origin PI WEB frame into a chat-only surface and keep it that way.
  *
@@ -359,7 +558,23 @@ const EMBED_STYLE_CSS = `
      unlayered rules outrank the host's layered shell stylesheet. */
   .shell { grid-template-columns: minmax(0, 1fr); }
   main { grid-column: 1 / -1; }
-  :host { background: var(--pi-bg); }
+  /* The frame's copy of the app must fill the frame and nothing else. As a
+     top-level page the app measures itself against the browser window: it is
+     position:fixed at 100dvh and pads its bottom by the home-indicator inset.
+     Inside the panel both are already accounted for by the page around the
+     frame, so on an installed app on a phone the embedded chat pads its
+     composer for the home indicator a second time and sits above the panel's
+     bottom edge with a dead strip underneath. Pinning the app to the frame's
+     own viewport also keeps it right when a frame's dvh is stale during an
+     address-bar or keyboard change. */
+  :host {
+    position: fixed !important;
+    inset: 0 !important;
+    height: auto !important;
+    padding: 0 !important;
+    --pi-app-safe-area-bottom: 0px;
+    background: var(--pi-bg);
+  }
   chat-view { min-height: 0; }
 `;
 function embedFrameRoot(frame) {

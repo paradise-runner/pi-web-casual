@@ -8,5 +8,6 @@ The **⁂** button beside **Actions** existed to reach Casual before the tab car
 - Moving between a project chat and Casual is now: click the tab to see Casual beside the project, or open the palette for a full view or a separate window. There is no one-click toggle and no automatic return.
 - `ProjectChatPoint`, `captureProjectChatPoint`, `projectChatDestination`, `backToProjectChat`, `casualSide`, and `casualButtonLabels` are gone, along with the stored `projectChat` field. The stored pointer is only the casual project, workspace, and session.
 - Nothing silently navigates the tab: state is shown in place, and navigation happens only from an explicit control.
+- Amended by ADR 0011: the tab now carries a conversation strip (numbered tabs, **+**, **×** on the active one). That is navigation between conversations, not a toolbar; every command still lives in the palette, and the card is still the only place the tab asks for anything.
 - Supersedes ADR 0006. Narrows ADR 0007: the separate window stays, but it is opened from the palette and behaves like any other tab.
 - A future host may offer a header or chat contribution point that makes an in-app switch native; then this decision is worth revisiting, not before.

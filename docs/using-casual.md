@@ -28,9 +28,20 @@ If those endpoints are unreachable, the panel shows a setup card instead. Add `~
 
 The Casual tab is a chat surface of its own. Once a conversation is remembered it embeds the real PI WEB chat in a same-origin frame, with that frame's navigation, header, and workspace columns hidden, so the chat fills the tab and your project chat in the main column keeps working beside it.
 
-The tab's **⁂** also reports what the conversation is doing, using the same colors as the sidebar's dots: green while the agent is working, accent while a finished reply is waiting for you, and untinted when nothing is in flight. The tooltip and screen-reader name say the same thing, so the state does not depend on seeing the color.
+## Conversations
 
-There is no toolbar, header, or card around it: the chat is the tab. The frame's chrome trimming is verified as it loads, and if the chat does not come out usable the frame falls back to a full app rather than an empty box — in that case use **Actions → Casual → Open Casual Chat** for a full view.
+Above the chat is a thin strip of numbered conversations, oldest first:
+
+- **Click a number** to switch conversations. Switching is instant: the chat keeps running and only the conversation changes.
+- **+** starts another conversation in the same home and opens it. It is appended on the right, so the numbers before it do not move.
+- **×** on the active tab archives that conversation. PI WEB moves it to its own **Archived** sessions, where you can restore it; Casual never deletes history. The last remaining tab has no **×**, so Casual always has a conversation to show.
+- Tab numbers follow position: close conversation 2 of 4 and the old 3 and 4 become 2 and 3.
+- Each tab's tooltip and screen-reader name carry the conversation's name once the agent has given it one, so a number alone is never the only label.
+- The strip is visible even with a single conversation, so **+** is always within reach.
+
+The keyboard reaches the strip too: **Tab** to it, then **←**, **→**, **Home**, and **End** move between conversations and open the one you land on.
+
+The tab's **⁂** also reports what the conversation is doing, using the same colors as the sidebar's dots: green while the agent is working, accent while a finished reply is waiting for you, and untinted when nothing is in flight. The tooltip and screen-reader name say the same thing, so the state does not depend on seeing the color.
 
 Setup, opening, and error states replace the frame with their card, because those need controls rather than a transcript. Everything else you might reach for is a palette action:
 **Open Casual Chat** (full view in this tab), **Open Casual Chat in Its Own Tab**, **New Casual Chat**, **Reset Casual Link**, and **Change Casual Home**.
@@ -58,8 +69,8 @@ The card appears when the tab has something to report rather than a conversation
 
 - **Open chat** — resolve the home and open the remembered session in this tab as a full view.
 - **Open in its own tab** — open or focus the separate window, leaving this tab alone (card states only).
-- **New chat** — create another session in the home and make it the remembered one. Nothing is deleted; the previous conversation stays in **Sessions**.
-- **Reset link** — clear the remembered workspace and session, keep the home, and reopen so the newest live casual session is chosen. Use it when the pointer is stale and reopening keeps failing.
+- **New chat** — create another session in the home, append it to the strip, and open it. Nothing is deleted; the previous conversations stay in the strip and in **Sessions**.
+- **Reset link** — clear the remembered workspace, session, and strip, keep the home, and reopen so the newest live casual session is chosen. Use it when the pointer is stale and reopening keeps failing.
 - **Change home** — clear the remembered project as well and show the project chooser, including the hidden `Casual` project if you want to come back.
 - **Retry** — run the open flow again with the same state.
 
@@ -84,8 +95,9 @@ Either way the new session becomes the one the tab embeds, and the previous conv
 | Situation | What to do |
 | --- | --- |
 | Casual never appears after install | PI WEB is older than `1.202610.3`. The browser console shows `PI WEB Casual requires PI WEB 1.202610.3 or newer`; update PI WEB, then reload the browser. |
-| The conversation seems gone | Open Casual again. It prefers the remembered session and otherwise takes the newest non-archived session in the home. |
+| The conversation seems gone | Open Casual again. It keeps the strip as it was, drops tabs whose conversation was archived elsewhere, and takes the newest live session if the active one is gone. |
 | The remembered session was archived or deleted | Same: opening Casual replaces the stale pointer with the newest live session. |
+| I closed a conversation and want it back | It is in PI WEB's **Archived** sessions, restore it there. |
 | The card keeps showing an error | **Retry** once, then **Reset link**, then reopen. |
 | The card keeps showing setup | Add `~/.casual-pi-web` through **Add Project**, or choose an existing project as the home. |
 | You want a clean start | **New Casual Chat**. Previous conversations stay in **Sessions**. |

@@ -19,12 +19,12 @@ It contributes:
 
 It behaves like this:
 
-- **One conversation.** The **Casual** tab and **Open Casual Chat** reopen the remembered session from any project.
-- **The Casual tab is only a chat.** The tab embeds the real PI WEB chat in a same-origin frame with that frame's navigation, header, and workspace column trimmed away, so a project chat in the main column keeps working next to it. There is no toolbar and no card around it; every control lives in the palette.
+- **One home, a few conversations.** The **Casual** tab keeps a numbered strip of conversations, all in the same hidden home. Click a number to switch, **+** to start another, **×** on the active tab to archive it; nothing reloads when you switch.
+- **The Casual tab is a chat with a strip.** The tab embeds the real PI WEB chat in a same-origin frame with that frame's navigation, header, and workspace column trimmed away, so a project chat in the main column keeps working next to it. Above the chat sits the conversation strip and nothing else: there is no toolbar and no card around the chat, and every other control lives in the palette.
 - **Hidden home.** The `Casual` project is filtered out of the **Projects** sidebar, including its row, the project count, and the collapsed-heading summary. It remains a real project for PI WEB: it appears in the **Change home** chooser, and its sessions appear in **Sessions** while it is selected.
-- **The tab shows what the agent is doing.** The **Casual** tab's **⁂** uses PI WEB's own status colors, the ones a project row would have shown: green while the agent works in the home, accent while a finished reply is still unread, untinted when nothing is in flight. The tab's tooltip and accessible name say the same thing.
-- **New chat keeps history.** **New Casual Chat** creates another session in the same home and makes it the remembered one. The previous conversation stays in **Sessions**; Casual never deletes.
-- **Self-repair.** Opening Casual resolves the home's workspaces and sessions and prefers the remembered session, so a stale or archived pointer is replaced by the newest live casual session instead of failing.
+- **The tab shows what the agent is doing.** The **Casual** tab's **⁂** uses PI WEB's own status colors, the ones a project row would have shown: green while the agent works in the home, accent while a finished reply is still unread, untinted when nothing is in flight. The tab's tooltip and accessible name say the same thing. The accent clears once the reply has been read in the tab, so it never outlives the visit.
+- **New chat keeps history.** **New Casual Chat** and the strip's **+** create another session in the same home and make it the active tab. The previous conversation stays in the strip and in **Sessions**; **×** archives through PI WEB, so it can be restored from the host's **Archived** sessions. Casual never deletes.
+- **Self-repair.** Opening Casual resolves the home's workspaces and sessions, drops tabs whose conversation was archived elsewhere, and falls back to the newest live session when the active one is gone.
 - **Automatic first run.** The first **Open chat** or palette open creates and trusts `~/.casual-pi-web`, starts a session, and reloads the page once into it. There is no **Add Project** step.
 
 ## Install
@@ -87,7 +87,9 @@ While the conversation is open, the **Casual** project is the selected project, 
 
 ## Limits (v1)
 
-- **One conversation.** No topics, folders, pins, or per-topic sessions. A new chat is a sibling session in the same home, not a new space.
+- **A handful of conversations, not a workspace of them.** One home, several conversations, no topics, folders, or per-conversation homes. Numbers follow position, so closing a conversation renumbers the ones after it.
+- **The strip has no agent status of its own.** The **⁂** on the Casual tab still reports work and unread replies for the whole home; individual tabs do not carry their own dot yet.
+- **Archiving needs a host with the session lifecycle route.** On an older PI WEB the **×** removes the tab and says so; the conversation stays in **Sessions**.
 - **The separate window is a browser tab.** The palette action opens a named window and reuses it; a popup blocker, or no casual session yet, falls back to opening the conversation in the current tab, and the window is closed like any other tab.
 - **One home per machine.** The home folder is fixed at `~/.casual-pi-web` unless you run **Change home**, and the remembered project/workspace/session pointer is stored per machine in `localStorage` under `pi-web-casual:store:v2`. A second machine finds or creates its own casual session.
 - **No settings pane.** PI WEB's plugin API has no Settings contribution, so the home folder and pointer are changed through the card's controls, not through configuration.
@@ -145,6 +147,7 @@ Issues and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.
 - [ADR 0008: The Casual panel embeds the chat in a same-origin frame](docs/adr/0008-panel-embeds-the-chat-in-a-same-origin-frame.md)
 - [ADR 0009: The Casual tab replaces the header button](docs/adr/0009-the-tab-replaces-the-header-button.md)
 - [ADR 0010: The Casual tab reports agent activity](docs/adr/0010-the-tab-reports-agent-activity.md)
+- [ADR 0011: Conversations live in a numbered strip](docs/adr/0011-conversations-in-a-strip.md)
 - [Vocabulary](GLOSSARY.md)
 - [Using Casual](docs/using-casual.md)
 - [How Casual works](docs/how-it-works.md)

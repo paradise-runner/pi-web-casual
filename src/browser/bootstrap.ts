@@ -59,6 +59,60 @@ function records(value: unknown): JsonRecord[] {
 }
 
 /**
+ * Start another session in the casual home through the host's own route, the
+ * same one first run uses. Nothing navigates: the new conversation is only
+ * returned, so the caller can point the strip at it.
+ */
+export async function startCasualSession(
+  machineId: string,
+  cwd: string,
+): Promise<{ id: string; name?: string } | undefined> {
+  const base = `api/machines/${encodeURIComponent(machineId)}`;
+  const raw = await requestJson(`${base}/sessions`, {
+    method: "POST",
+    body: JSON.stringify({ cwd }),
+  });
+  const session = asRecord(raw);
+  const id = stringField(session, "id");
+  if (id === undefined) return undefined;
+  const name = stringField(session, "name");
+  return name === undefined ? { id } : { id, name };
+}
+
+/** A session in the home, from the host's own session list for that folder. */
+export interface HomeSession {
+  readonly id: string;
+  readonly name?: string;
+  readonly archived: boolean;
+}
+
+/**
+ * The home's sessions straight from the host's own list route. Two uses where
+ * the public catalog is unavailable: naming the strip's tabs, and telling a
+ * conversation that can still be archived from one the host never persisted.
+ */
+export async function listHomeSessions(
+  machineId: string,
+  cwd: string,
+): Promise<readonly HomeSession[] | undefined> {
+  const base = `api/machines/${encodeURIComponent(machineId)}`;
+  const raw = await requestJson(`${base}/sessions?cwd=${encodeURIComponent(cwd)}`);
+  if (!Array.isArray(raw)) return undefined;
+  const sessions: HomeSession[] = [];
+  for (const item of records(raw)) {
+    const id = stringField(item, "id");
+    if (id === undefined) continue;
+    const name = stringField(item, "name");
+    sessions.push({
+      id,
+      ...(name === undefined ? {} : { name }),
+      archived: item["archived"] === true,
+    });
+  }
+  return sessions;
+}
+
+/**
  * First-run bootstrap. The public plugin API cannot register a project, so this
  * uses the host's own same-origin project/session endpoints. The folder is
  * expanded and created by the host, which also means `~` resolves on the
@@ -114,6 +168,38 @@ export async function bootstrapCasual(machineId: string): Promise<BootstrapResul
     workspacePath,
     ...(sessionId === undefined ? {} : { sessionId }),
   };
+}
+
+/**
+ * Archive a session through PI WEB's own lifecycle route. The route is the one
+ * backing the host's session actions, so an archived conversation lands in the
+ * host's **Archived** section and can be restored there.
+ *
+ * `missing` is the conversation the host never wrote to disk — a session that was
+ * started and never used — which has nothing to archive and nothing to lose.
+ */
+export async function archiveCasualSession(
+  machineId: string,
+  selection: { projectId: string; workspaceId: string; sessionId: string },
+): Promise<"archived" | "unsupported" | "missing" | "failed"> {
+  const base = `api/machines/${encodeURIComponent(machineId)}/plugin-sessions`;
+  const url =
+    `${base}/projects/${encodeURIComponent(selection.projectId)}` +
+    `/workspaces/${encodeURIComponent(selection.workspaceId)}` +
+    `/sessions/${encodeURIComponent(selection.sessionId)}/archive`;
+  try {
+    const response = await fetch(url, { method: "POST", credentials: "same-origin" });
+    if (response.ok) return "archived";
+    // A host without the lifecycle route answers 404 from the app shell.
+    if (response.status === 404 || response.status === 405) return "unsupported";
+    const body = await response.text().catch(() => "");
+    if (/ENOENT|no such file/iu.test(body)) return "missing";
+    console.warn(`[pi-web-casual] archive failed: ${response.status}`, body);
+    return "failed";
+  } catch (error) {
+    console.warn("[pi-web-casual] archive failed", error);
+    return "failed";
+  }
 }
 
 /** Reload straight into the native chat for the bootstrapped conversation. */
