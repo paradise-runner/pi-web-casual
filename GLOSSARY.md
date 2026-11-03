@@ -23,8 +23,12 @@ The PI WEB project named `Casual` at `~/.casual-pi-web`, created and trusted on 
 _Avoid_: folder, workspace, scratch repo
 
 **Pointer**:
-The remembered project, workspace, conversation strip, and active conversation in `localStorage` under `pi-web-casual:store:v2`, stored per machine.
+The remembered project, workspace, conversation strip, and active conversation, kept as a local copy in `localStorage` under `pi-web-casual:store:v2` and published as the **shared strip**.
 _Avoid_: config, state, cache
+
+**Shared strip**:
+The copy of the strip and the active conversation that every browser on the machine reads and writes, in `~/.casual-pi-web/.pi-web/casual/state.json`. The newest write wins; a conversation's tab is dropped when the host no longer has it.
+_Avoid_: cloud state, sync server, database
 
 **Card**:
 What the Casual tab shows when it has something to report instead of a chat: first run, setup, or an error. It carries **Open chat**, **Open Actions**, and the recovery controls.
@@ -37,19 +41,19 @@ _Avoid_: launcher, shortcut
 ### Operations
 
 **Open**:
-Resolve the home, discover its workspaces and sessions, remember the chosen session, and navigate to it.
+Resolve the home, adopt the shared strip, create the first conversation if the home has none, and bring the Casual tab forward with the active conversation embedded.
 _Avoid_: launch, load, restore
 
-**Casual window**:
-The separate browser tab opened from the palette by name (`pi-web-casual-chat`), so Casual can sit beside a project chat. Opening it again focuses that window instead of stacking tabs.
-_Avoid_: popup, side panel, split view
+**Sync**:
+Settle the local pointer against the shared strip and the host's session list: adopt a newer shared write, drop conversations the host no longer has, and publish what changed.
+_Avoid_: pull, fetch, refresh
 
 **Embedded chat**:
 The chat the Casual tab shows in place: a same-origin frame pointed at the casual chat route, named `pi-web-casual-embed`, with that frame's own navigation and header hidden.
 _Avoid_: preview, mini app, iframe view
 
 **New chat**:
-Create another session in the home, append it to the strip, and make it the active tab. Previous conversations are untouched.
+Create another session in the home, append it to the strip, and make it the active tab, without navigating the page. Previous conversations are untouched.
 _Avoid_: reset, restart, clear
 
 **Archive a conversation**:
@@ -57,7 +61,7 @@ What the **×** on the active tab does: PI WEB's own archive action, so the conv
 _Avoid_: close, delete, remove
 
 **Reset link**:
-Clear the remembered workspace and session but keep the home, then open again so the newest live session is chosen.
+Clear the remembered workspace, session, and strip but keep the home, then open again with a single fresh conversation.
 _Avoid_: logout, sign out, wipe
 
 **Change home**:
@@ -65,7 +69,7 @@ Clear the remembered project as well, then show the project chooser.
 _Avoid_: switch workspace, disconnect
 
 **Bootstrap**:
-The first-run sequence that creates and trusts `~/.casual-pi-web`, starts a session, and reloads the page once.
+The first-run sequence that creates and trusts `~/.casual-pi-web`, starts a session, and reloads the page once into the Casual tab.
 _Avoid_: setup wizard, installer
 
 ### Surfaces

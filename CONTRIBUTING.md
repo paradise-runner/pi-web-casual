@@ -39,7 +39,7 @@ Then reload the browser. No session-daemon restart is needed for this plugin.
 
 ## Manual test checklist
 
-- First run in a clean PI WEB data directory creates `~/.casual-pi-web`, trusts it, starts a session, and opens the chat.
+- First run in a clean PI WEB data directory creates `~/.casual-pi-web`, trusts it, starts a session, and lands in the Casual tab with that conversation embedded.
 - The sidebar hides the Casual project row and shows the adjusted project count, both expanded and collapsed.
 - Expanding and collapsing **Projects** (and redrawing the sidebar) never paints the Casual row; a cold page load may show it only until the plugin has loaded.
 - The Casual tab's **⁂** turns green while the casual chat is working and accent while a finished reply is unread, with a matching tooltip and accessible name, and returns to no tint when nothing is in flight.
@@ -53,13 +53,13 @@ Then reload the browser. No session-daemon restart is needed for this plugin.
 - Reloading with several conversations keeps the strip, keeps the active one, drops tabs whose conversation was archived elsewhere, and does not reload the chat when switching.
 - The embedded state renders the chat alone: no card, header, or toolbar above or below it, and every control is reachable from the palette.
 - When the embedded frame cannot be trimmed into a usable chat, it falls back to a full app and **Open chat** still gives a full view.
-- **Open in its own tab** on the card and **Open Casual Chat in Its Own Tab** in the palette do the same from anywhere, falling back to the current tab when a popup blocker intervenes or no casual session exists yet.
-- The Casual tab opens the chat.
-- **New chat** creates a new session and makes it the remembered one.
+- The strip and the active conversation are shared: with two browser profiles or a phone pointed at the same PI WEB, each shows the same numbered conversations and the same active one, a tab switch on one is picked up by the other on focus or reload, and `~/.casual-pi-web/.pi-web/casual/state.json` matches what both show.
+- A conversation started on one device appears on the other within one focus, and archiving it there removes the tab on both.
+- **New Casual Chat** in the palette stays in the Casual tab, leaves the project chat in the main column alone, and appends an active tab; opening and starting never navigate to `view=chat`.
+- There is no separate window: no **Open in its own tab** on the card and no **Open Casual Chat in Its Own Tab** in the palette.
 - **Reset link** and **Change home** recover from missing or changed sessions.
 - Palette actions — **Open Casual Chat**, **New Casual Chat**, **Set Up Casual Chat** — work from the palette on both layouts.
-- The palette opens Casual as a full view and in its own named window; opening the window twice focuses one tab.
-- No console errors.
+- No console errors, apart from one `400` when Casual reads the shared state file for the first time in a home that has none. That is the host's answer for a missing file, not a failure; the file is written on the first change.
 
 ## Documentation
 
