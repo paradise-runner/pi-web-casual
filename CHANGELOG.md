@@ -25,6 +25,18 @@
 
 - **Older hosts fail loudly instead of silently.** Activation now checks for PI WEB's browser selection service and throws `PI WEB Casual requires PI WEB 1.202610.3 or newer` when it is missing. PI WEB `1.202610.1` accepts the plugin's `apiVersion: 4` but has no application panels, selection service, or project discovery, so it used to install, report the plugin as active, and register palette actions that could never open a chat. PI WEB has no install-time host-version gate, so activation is the earliest enforceable point; the host reports the failure as `Failed to register PI WEB plugin pi-web-casual during activate` and registers no contributions.
 
+## [0.4.0](https://github.com/paradise-runner/pi-web-casual/compare/v0.3.0...v0.4.0) (2026-11-03)
+
+
+### Features
+
+* casual conversations in a numbered strip ([f8e9abf](https://github.com/paradise-runner/pi-web-casual/commit/f8e9abfd3e5d58808f74e34a76f8f3c9b36f6353))
+
+
+### Bug Fixes
+
+* keep the strip in step with storage, and let an archive be undone ([69410d3](https://github.com/paradise-runner/pi-web-casual/commit/69410d38599d32e2252505763ab5f7d1101722b1))
+
 ## [0.3.0](https://github.com/paradise-runner/pi-web-casual/compare/v0.2.1...v0.3.0) (2026-10-25)
 
 
