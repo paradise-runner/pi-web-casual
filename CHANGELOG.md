@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/paradise-runner/pi-web-casual/compare/v0.4.0...v0.5.0) (2026-11-03)
+
+
+### Features
+
+* sync the strip across devices and keep everything in the Casual tab ([cc8f2e3](https://github.com/paradise-runner/pi-web-casual/commit/cc8f2e382f577788fcfbccb7489bee3ad3e0a30c))
+
 ## [0.4.0](https://github.com/paradise-runner/pi-web-casual/compare/v0.3.0...v0.4.0) (2026-11-03)
 
 
