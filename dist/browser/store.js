@@ -50,6 +50,7 @@ function normalizeRecord(record) {
         tabs.push({
             sessionId,
             ...(typeof entry.sessionName === "string" ? { sessionName: entry.sessionName } : {}),
+            ...(typeof entry.addedAt === "number" ? { addedAt: entry.addedAt } : {}),
         });
     }
     const next = { ...(record ?? {}), tabs };
@@ -69,15 +70,37 @@ export function readRecords() {
     }
     return records;
 }
-export function patchRecord(machineId, patch) {
+/**
+ * Write one record. `touch` bumps the shared clock, which is what another device
+ * compares against; a local-only change (a refreshed name, a resolved folder)
+ * passes `touch: false` so it does not look like a newer strip.
+ */
+export function patchRecord(machineId, patch, options = {}) {
     const store = readStore();
     // Normalize what is already stored first, so a record written before `tabs`
     // existed materializes its tab list instead of losing it the first time the
     // active conversation changes.
     const current = normalizeRecord(store.machines[machineId]);
+    const updatedAt = options.touch === false ? current.updatedAt : Date.now();
     // Normalize again after the patch: making a conversation active also puts it in
     // the strip, and that has to reach storage, not just the object returned here.
-    const next = normalizeRecord({ ...current, ...patch });
+    const next = normalizeRecord({
+        ...current,
+        ...patch,
+        ...(updatedAt === undefined ? {} : { updatedAt }),
+    });
+    store.machines[machineId] = next;
+    writeStore(store);
+    return next;
+}
+/**
+ * Replace the record with what the shared copy says, keeping the stamp it was
+ * written with so this browser does not look like the newer writer and echo the
+ * same strip back to the host.
+ */
+export function adoptRecord(machineId, record) {
+    const store = readStore();
+    const next = normalizeRecord(record);
     store.machines[machineId] = next;
     writeStore(store);
     return next;

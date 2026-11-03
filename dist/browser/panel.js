@@ -1,8 +1,69 @@
 import { acknowledgeCasualUnread } from "./activity.js";
-import { activateCasualTab, archiveCasualTab, casualArchiveUndo, casualChatSrc, casualStripNotice, changeCasualHome, chooseProject, getStatus, newCasualChat, newCasualTab, openCasual, openCasualInOwnTab, panelOpenContext, readCasualTabs, refreshCasualPointer, resetCasualLink, undoCasualArchive, } from "./casual.js";
+import { activateCasualTab, archiveCasualTab, casualArchiveUndo, casualChatSrc, casualStripNotice, changeCasualHome, chooseProject, getStatus, newCasualChat, newCasualTab, openCasual, panelOpenContext, readCasualTabs, resetCasualLink, syncCasualHome, undoCasualArchive, } from "./casual.js";
 import { clickActionsButton, EMBED_FRAME_NAME, embeddedChatSession, findCasualFrame, isEmbeddedFrame, superviseEmbeddedChat, switchEmbeddedChat, } from "./dom.js";
 import { readRecord } from "./store.js";
 const NO_CONVERSATION = "No conversation yet";
+/**
+ * A palette action runs outside the panel and cannot ask the host to redraw it,
+ * so while a flow is in flight the panel asks for its own repaint. Idle panels
+ * do not tick: nothing is requested unless a flow reports it is working.
+ */
+const FLOW_TICK_MS = 350;
+const FLOW_DEADLINE_MS = 90_000;
+const flowDeadlines = new Map();
+let latestContext;
+let flowTicker;
+function keepFlowStatusFresh(context) {
+    latestContext = context;
+    if (flowTicker !== undefined)
+        return;
+    flowTicker = window.setInterval(() => {
+        const panel = latestContext;
+        if (panel === undefined)
+            return;
+        const machineId = panel.machine.id;
+        if (getStatus(machineId).kind !== "opening") {
+            flowDeadlines.delete(machineId);
+            return;
+        }
+        const now = Date.now();
+        const deadline = flowDeadlines.get(machineId) ?? now + FLOW_DEADLINE_MS;
+        flowDeadlines.set(machineId, deadline);
+        if (now > deadline)
+            return;
+        try {
+            panel.host.requestRender();
+        }
+        catch (error) {
+            console.warn("[pi-web-casual] could not refresh the panel", error);
+        }
+    }, FLOW_TICK_MS);
+}
+/** The context of the latest render, so a window that regains focus can re-sync. */
+let latestOpen;
+let focusSyncInstalled = false;
+/**
+ * Settle the strip against the shared copy on every render, and again when the
+ * window regains focus — that is the moment a conversation picked on another
+ * device should appear here.
+ */
+function keepCasualInSync(open) {
+    latestOpen = open;
+    if (!focusSyncInstalled) {
+        focusSyncInstalled = true;
+        const sync = () => {
+            const current = latestOpen;
+            if (current !== undefined)
+                void syncCasualHome(current, { force: true });
+        };
+        window.addEventListener("focus", sync);
+        document.addEventListener("visibilitychange", () => {
+            if (!document.hidden)
+                sync();
+        });
+    }
+    void syncCasualHome(open);
+}
 const cardStyle = [
     "box-sizing:border-box",
     "width:min(100%,460px)",
@@ -182,14 +243,21 @@ export function renderPanel(html, context) {
         (record.sessionId === undefined ? NO_CONVERSATION : `Session ${record.sessionId.slice(0, 8)}`);
     const location = record.workspacePath ?? record.projectPath ?? "";
     const src = casualChatSrc(open);
-    // Keep the embedded chat pointed at the newest live session, without
-    // navigating the tab the user is looking at.
-    if (src !== undefined && !isEmbeddedFrame())
-        void refreshCasualPointer(open);
+    // Keep the strip and the embedded chat in step with the shared copy another
+    // device may have written, without navigating the tab the user is looking at.
+    // This also runs while the card is on screen, so a browser that has never seen
+    // Casual before adopts the strip that already exists on the host.
+    if (!isEmbeddedFrame()) {
+        keepFlowStatusFresh(context);
+        keepCasualInSync(open);
+    }
     // A remembered conversation makes the tab a chat and nothing else: no card,
     // no toolbar. Everything else lives in the palette, where the other Casual
     // actions already are.
-    if (src !== undefined && !isEmbeddedFrame() && (status.kind === "idle" || status.kind === "ready")) {
+    // A flow in progress must not replace the conversation on screen with a card:
+    // the strip already shows what changed, and the chat stays usable meanwhile.
+    const statusAllowsChat = status.kind === "idle" || status.kind === "opening" || status.kind === "ready";
+    if (src !== undefined && !isEmbeddedFrame() && statusAllowsChat) {
         // The reply is on screen here, so an unread completion for this conversation
         // can be cleared. The embedded frame cannot report that itself: PI WEB only
         // counts a chat as read once its own document has focus, and the host chrome
@@ -233,7 +301,6 @@ export function renderPanel(html, context) {
             console.warn("[pi-web-casual] could not open Actions");
     };
     const newChat = () => void newCasualChat(open);
-    const ownTab = () => void openCasualInOwnTab(open);
     return html `
     <div style=${cardStyle}>
       <div style=${headerStyle}>
@@ -243,7 +310,7 @@ export function renderPanel(html, context) {
           <span style=${mutedStyle}>One ongoing conversation outside your projects</span>
         </div>
       </div>
-      ${renderBody(html, open, status, sessionLabel, location, retry, newChat, ownTab, openActions)}
+      ${renderBody(html, open, status, sessionLabel, location, retry, newChat, openActions)}
     </div>
   `;
 }
@@ -360,7 +427,7 @@ function moveTabFocus(event, open) {
     if (sessionId !== undefined)
         activateCasualTab(open, sessionId);
 }
-function renderBody(html, open, status, sessionLabel, location, retry, newChat, ownTab, openActions) {
+function renderBody(html, open, status, sessionLabel, location, retry, newChat, openActions) {
     if (status.kind === "idle") {
         return html `
       ${sessionLabel === NO_CONVERSATION
@@ -374,8 +441,7 @@ function renderBody(html, open, status, sessionLabel, location, retry, newChat, 
             </div>
           `}
       <div style=${rowStyle}>
-        ${button(html, "Open chat", retry, true)}${button(html, "Open in its own tab", ownTab)}
-        ${button(html, "Open Actions", openActions)}
+        ${button(html, "Open chat", retry, true)}${button(html, "Open Actions", openActions)}
       </div>
     `;
     }
@@ -423,14 +489,12 @@ function renderBody(html, open, status, sessionLabel, location, retry, newChat, 
     </div>
     ${status.message === undefined ? null : html `<p style=${mutedParagraphStyle}>${status.message}</p>`}
     <div style=${rowStyle}>
-      ${button(html, "Open chat", retry, true)}
-      ${button(html, "Open in its own tab", ownTab)}
-      ${button(html, "New chat", newChat)}
+      ${button(html, "Open chat", retry, true)}${button(html, "New chat", newChat)}
       ${button(html, "Open Actions", openActions)}
     </div>
     <p style=${mutedParagraphStyle}>
-      Open chat uses this tab. Open in its own tab keeps your project chat open beside Casual. \u2042 opens Casual beside the
-      project chat, or closes the separate window to return. Starting a new chat leaves the previous one in Sessions.
+      Conversations stay in this tab: the strip switches between them, + starts another one, and the project chat in the
+      main column is left alone.
     </p>
     <div style=${rowStyle}>
       ${smallButton(html, "Reset link", () => {

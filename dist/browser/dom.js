@@ -660,47 +660,6 @@ export function superviseEmbeddedChat(frame) {
     frame.addEventListener("load", () => enforceEmbeddedChat(frame));
     enforceEmbeddedChat(frame);
 }
-/** Select the plugin's application tab. The tab only shows the Casual card; callers that
- * need the chat set an open/return intent first. */
-export function clickCasualTab() {
-    for (const root of knownShadowRoots()) {
-        for (const label of root.querySelectorAll(".tab-label")) {
-            if ((label.textContent ?? "").trim() !== "Casual")
-                continue;
-            const button = label.closest("button");
-            if (button !== null) {
-                button.click();
-                return true;
-            }
-        }
-        for (const button of root.querySelectorAll("button")) {
-            const label = (button.getAttribute("aria-label") ?? button.title ?? "").trim();
-            if (label === "Casual" || label.startsWith("Casual,")) {
-                button.click();
-                return true;
-            }
-        }
-    }
-    return false;
-}
-/** Click the host's "+" next to Sessions, the supported UI way to create a session. */
-export function clickStartSession() {
-    for (const root of knownShadowRoots()) {
-        for (const button of root.querySelectorAll("button.start-session-button")) {
-            if (button.disabled)
-                continue;
-            button.click();
-            return true;
-        }
-        for (const button of root.querySelectorAll('button[aria-label^="Start a"]')) {
-            if (button.disabled)
-                continue;
-            button.click();
-            return true;
-        }
-    }
-    return false;
-}
 /** Open the host Actions palette, where Add Project and the Casual actions live. */
 export function clickActionsButton() {
     for (const root of knownShadowRoots()) {
@@ -716,15 +675,4 @@ export function clickActionsButton() {
         }
     }
     return false;
-}
-export async function waitFor(predicate, timeoutMs, intervalMs = 100) {
-    const deadline = Date.now() + timeoutMs;
-    for (;;) {
-        const value = predicate();
-        if (value !== undefined && value !== false)
-            return value;
-        if (Date.now() >= deadline)
-            return undefined;
-        await new Promise((resolve) => window.setTimeout(resolve, intervalMs));
-    }
 }

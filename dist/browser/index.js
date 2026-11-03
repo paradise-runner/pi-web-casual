@@ -1,11 +1,13 @@
 import { startCasualActivityBridge } from "./activity.js";
-import { changeCasualHome, newCasualChat, openCasual, openCasualInOwnTab, resetCasualLink, runtimeOpenContext, setSelectionService, } from "./casual.js";
+import { changeCasualHome, newCasualChat, openCasual, resetCasualLink, runtimeOpenContext, } from "./casual.js";
 import { startCasualHostBridge, TAB_COLOR_VARIABLE } from "./dom.js";
 import { renderPanel } from "./panel.js";
 /**
  * Oldest PI WEB with the browser v4 surface Casual is built on: application
- * panels, the selection service, and project discovery. `1.202610.1` also
- * accepts `apiVersion: 4`, but exposes none of them.
+ * panels and project discovery. `1.202610.1` also accepts `apiVersion: 4`, but
+ * exposes neither. The selection service is no longer used, but it arrived with
+ * those two and is the only v4 field that tells the versions apart, so activation
+ * still probes for it.
  */
 const MINIMUM_PI_WEB_VERSION = "1.202610.3";
 /**
@@ -27,7 +29,6 @@ const plugin = {
     name: "PI WEB Casual",
     activate: (context) => {
         requireSupportedHost(context);
-        setSelectionService(context.selection);
         startCasualHostBridge(context.lifetimeSignal);
         startCasualActivityBridge(context.lifetimeSignal);
         const actions = [
@@ -39,21 +40,11 @@ const plugin = {
                 run: (runtime) => openCasual(runtimeOpenContext(runtime)),
             },
             {
-                id: "open-tab",
-                title: "Open Casual Chat in Its Own Tab",
-                description: "Open the casual conversation in a separate browser tab so a project chat stays open",
-                group: "Casual",
-                run: (runtime) => openCasualInOwnTab(runtimeOpenContext(runtime)),
-            },
-            {
                 id: "new",
                 title: "New Casual Chat",
-                description: "Start another conversation in the casual workspace and add it to the strip",
+                description: "Add another conversation to the Casual strip and open it in the Casual tab",
                 group: "Casual",
-                run: (runtime) => newCasualChat({
-                    ...runtimeOpenContext(runtime),
-                    startSession: () => runtime.startSession(),
-                }),
+                run: (runtime) => newCasualChat(runtimeOpenContext(runtime)),
             },
             {
                 id: "reset",

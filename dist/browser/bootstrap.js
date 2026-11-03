@@ -89,6 +89,27 @@ export async function listHomeSessions(machineId, cwd) {
     return sessions;
 }
 /**
+ * The home's workspaces from the host's own route. The public catalog is only
+ * handed to API v5 plugins, so a v4 plugin resolves the workspace here; first run
+ * already depends on the same route for the folder's initial setup.
+ */
+export async function listProjectWorkspaces(machineId, projectId) {
+    const base = `api/machines/${encodeURIComponent(machineId)}`;
+    const raw = await requestJson(`${base}/projects/${encodeURIComponent(projectId)}/workspaces`);
+    const resolution = asRecord(raw);
+    if (resolution === undefined)
+        return undefined;
+    const workspaces = [];
+    for (const item of records(resolution["workspaces"])) {
+        const id = stringField(item, "id");
+        const path = stringField(item, "path");
+        if (id === undefined || path === undefined)
+            continue;
+        workspaces.push({ id, path, isMain: item["isMain"] === true });
+    }
+    return workspaces;
+}
+/**
  * First-run bootstrap. The public plugin API cannot register a project, so this
  * uses the host's own same-origin project/session endpoints. The folder is
  * expanded and created by the host, which also means `~` resolves on the
@@ -184,18 +205,14 @@ export async function restoreCasualSession(machineId, selection) {
         return false;
     }
 }
-/** Reload straight into the native chat for the bootstrapped conversation. */
-export function reloadToCasualChat(machineId, projectId, workspaceId, sessionId) {
-    window.location.assign(casualChatUrl(machineId, projectId, workspaceId, sessionId));
-}
-/** Route URL for the casual chat; used both for the one-time reload and for its own window. */
+/** Route URL for the casual chat, used by the panel's embedded surface. */
 export function casualChatUrl(machineId, projectId, workspaceId, sessionId) {
     const params = routeParams(machineId, projectId, workspaceId);
     params.set("session", sessionId);
     params.set("view", "chat");
     return `${window.location.pathname}?${params.toString()}`;
 }
-/** Reload into the Casual panel so its normal flow can create the session. */
+/** Reload into the Casual panel, which is where every casual conversation lives. */
 export function reloadToCasualPanel(machineId, projectId, workspaceId) {
     const params = routeParams(machineId, projectId, workspaceId);
     params.set("tool", CASUAL_PANEL_TOOL);

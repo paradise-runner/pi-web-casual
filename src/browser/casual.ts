@@ -1,15 +1,34 @@
 import type {
   ApplicationPanelContext,
   PluginNavigate,
-  PluginNavigationDestination,
   PluginProject,
   PluginRuntimeContext,
-  PluginSelectedSession,
-  PluginSelectionService,
 } from "@jmfederico/pi-web/plugin-api";
-import { bootstrapCasual, casualChatUrl, listHomeSessions, reloadToCasualChat, reloadToCasualPanel, startCasualSession, archiveCasualSession, restoreCasualSession } from "./bootstrap.js";
-import { clickCasualTab, clickStartSession, waitFor } from "./dom.js";
-import { patchRecord, readRecord, type CasualRecord, type CasualTabRecord } from "./store.js";
+import {
+  archiveCasualSession,
+  bootstrapCasual,
+  CASUAL_PANEL_TOOL,
+  casualChatUrl,
+  listHomeSessions,
+  listProjectWorkspaces,
+  reloadToCasualPanel,
+  restoreCasualSession,
+  startCasualSession,
+} from "./bootstrap.js";
+import {
+  queueSharedState,
+  readSharedState,
+  sameSharedContent,
+  sharedStateOf,
+  type SharedStateRead,
+} from "./shared.js";
+import {
+  adoptRecord,
+  patchRecord,
+  readRecord,
+  type CasualRecord,
+  type CasualTabRecord,
+} from "./store.js";
 import type { CatalogSession, CatalogWorkspace, PluginCatalog } from "./types.js";
 
 export interface CasualSession {
@@ -25,8 +44,13 @@ export interface OpenContext {
   readonly navigate: PluginNavigate;
   readonly projects?: { listProjects(): Promise<readonly PluginProject[]> };
   readonly catalog?: PluginCatalog;
-  readonly startSession?: () => void | Promise<void>;
   readonly requestRender?: () => void;
+  /**
+   * Bring the plugin's own application tab forward, the way a palette action
+   * should. Only a runtime context can do this; inside the panel there is
+   * nothing to select, so it is absent there.
+   */
+  readonly selectPanel?: () => void | Promise<void>;
 }
 
 export type CasualStatusKind = "idle" | "opening" | "ready" | "setup" | "error";
@@ -67,13 +91,17 @@ const startedHere = new Set<string>();
 const openTasks = new Map<string, Promise<void>>();
 const newTasks = new Map<string, Promise<void>>();
 const chooserMachines = new Set<string>();
-let selectionService: PluginSelectionService | undefined;
-/** Window name of the separate Casual tab, so later opens focus it instead of stacking tabs. */
-const CASUAL_WINDOW_NAME = "pi-web-casual-chat";
 
-export function setSelectionService(service: PluginSelectionService | undefined): void {
-  selectionService = service;
-}
+/**
+ * How long a conversation a browser has not seen yet is allowed to be missing
+ * from the host's session list before its tab is pruned. Another device can add
+ * a conversation and write the strip before the host has a file for it, and this
+ * browser must not undo that.
+ */
+const FRESH_TAB_GRACE_MS = 10 * 60_000;
+/** One shared-state read per panel render is enough; renders come in bursts. */
+const SYNC_INTERVAL_MS = 2500;
+const syncRuns = new Map<string, { at: number; running: boolean }>();
 
 export function getStatus(machineId: string): CasualStatus {
   return statuses.get(machineId) ?? { kind: "idle" };
@@ -123,15 +151,15 @@ export function activateCasualTab(context: OpenContext, sessionId: string): void
   // The strip is drawn from the record, so a tab that is on screen but missing
   // from the record is a bug in the record: adopt the tab rather than ignore the
   // click, which would make the tab look dead.
-  if (tab === undefined) {
-    setStripNotice(context, undefined);
-    patchRecord(context.machineId, { sessionId });
-    context.requestRender?.();
-    return;
-  }
   setStripNotice(context, undefined);
-  patchRecord(context.machineId, { sessionId: tab.sessionId, sessionName: tab.sessionName });
   archiveUndos.delete(context.machineId);
+  patchCasual(context, {
+    sessionId,
+    ...(tab?.sessionName === undefined ? {} : { sessionName: tab.sessionName }),
+    ...(tab === undefined
+      ? { tabs: [...(record.tabs ?? []), { sessionId, addedAt: Date.now() }] }
+      : {}),
+  });
   context.requestRender?.();
 }
 
@@ -140,35 +168,45 @@ export function activateCasualTab(context: OpenContext, sessionId: string): void
  * active tab. This deliberately does not navigate the host page. The session is
  * created through the same route first run uses, so it works on every supported
  * host instead of depending on the sidebar's **+** button.
+ *
+ * The palette's **New Casual Chat** runs the same code and then brings the Casual
+ * tab forward, so every conversation starts inside the tab that shows the strip.
  */
-export async function newCasualTab(context: OpenContext): Promise<void> {
+export async function newCasualTab(context: OpenContext): Promise<boolean> {
+  const home = await resolveHome(context);
   const record = readRecord(context.machineId);
-  const cwd = record.workspacePath ?? record.projectPath;
-  if (cwd === undefined) return;
+  const cwd =
+    home?.workspace?.path ??
+    home?.project.path ??
+    record.workspacePath ??
+    record.projectPath;
+  if (cwd === undefined) return false;
   const created = await startCasualSession(context.machineId, cwd);
   if (created === undefined) {
     setStripNotice(context, "Could not start a new conversation.");
-    return;
+    return false;
   }
   startedHere.add(created.id);
   archiveUndos.delete(context.machineId);
-  patchRecord(context.machineId, {
+  patchCasual(context, {
     // Append explicitly as well as making it active: the strip's order is the
     // user's, and a new conversation belongs at the end of it.
-    tabs: [...(record.tabs ?? []), { sessionId: created.id, ...(created.name === undefined ? {} : { sessionName: created.name }) }],
+    tabs: [
+      ...(record.tabs ?? []),
+      {
+        sessionId: created.id,
+        ...(created.name === undefined ? {} : { sessionName: created.name }),
+        addedAt: Date.now(),
+      },
+    ],
     sessionId: created.id,
     ...(created.name === undefined ? {} : { sessionName: created.name }),
   });
   setStripNotice(context, undefined);
   context.requestRender?.();
+  return true;
 }
 
-/**
- * The strip's **×**: archive the conversation and drop its tab. Archiving is the
- * host's own session action, so the conversation keeps its place in PI WEB's
- * **Archived** sessions and can be restored there. The last tab stays: Casual is
- * never left without a conversation to show.
- */
 /**
  * What the strip can put back after an **×**: the conversation, its place in the
  * strip, and the notice that offers the restore.
@@ -214,8 +252,9 @@ export async function undoCasualArchive(context: OpenContext): Promise<void> {
   tabs.splice(at, 0, {
     sessionId: undo.sessionId,
     ...(undo.sessionName === undefined ? {} : { sessionName: undo.sessionName }),
+    addedAt: Date.now(),
   });
-  patchRecord(context.machineId, {
+  patchCasual(context, {
     tabs,
     sessionId: undo.sessionId,
     ...(undo.sessionName === undefined ? {} : { sessionName: undo.sessionName }),
@@ -225,6 +264,12 @@ export async function undoCasualArchive(context: OpenContext): Promise<void> {
   context.requestRender?.();
 }
 
+/**
+ * The strip's **×**: archive the conversation and drop its tab. Archiving is the
+ * host's own session action, so the conversation keeps its place in PI WEB's
+ * **Archived** sessions and can be restored there. The last tab stays: Casual is
+ * never left without a conversation to show.
+ */
 export async function archiveCasualTab(context: OpenContext, sessionId: string): Promise<void> {
   const record = readRecord(context.machineId);
   const tabs = record.tabs ?? [];
@@ -256,7 +301,7 @@ export async function archiveCasualTab(context: OpenContext, sessionId: string):
 
   const remaining = tabs.filter((tab) => tab.sessionId !== sessionId);
   const neighbour = remaining[Math.min(index, remaining.length - 1)];
-  patchRecord(context.machineId, {
+  patchCasual(context, {
     tabs: remaining,
     ...(record.sessionId !== sessionId || neighbour === undefined
       ? {}
@@ -299,11 +344,18 @@ export function panelOpenContext(context: ApplicationPanelContext): OpenContext 
 
 export function runtimeOpenContext(context: PluginRuntimeContext): OpenContext {
   const catalog = catalogOf(context);
+  // The public way for a palette action to land on the plugin's own tab without
+  // moving the project chat that is open in the main column. A runtime context
+  // has no renderer of its own; selecting the tool is what draws the panel the
+  // first time, and the panel repaints itself while a flow is in flight.
+  const selectPanel = (): void => context.selectWorkspaceTool(CASUAL_PANEL_TOOL);
   return {
     machineId: context.state.selectedMachine?.id ?? "local",
     navigate: context.navigate,
     ...(context.projects === undefined ? {} : { projects: context.projects }),
     ...(catalog === undefined ? {} : { catalog }),
+    selectPanel,
+    requestRender: selectPanel,
   };
 }
 
@@ -330,13 +382,14 @@ export function newCasualChat(context: OpenContext): Promise<void> {
 }
 
 export function chooseProject(context: OpenContext, project: PluginProject): Promise<void> {
-  patchRecord(context.machineId, {
+  patchCasual(context, {
     projectId: project.id,
     projectPath: project.path,
     workspaceId: undefined,
     workspacePath: undefined,
     sessionId: undefined,
     sessionName: undefined,
+    tabs: [],
   });
   return openCasual(context);
 }
@@ -344,7 +397,7 @@ export function chooseProject(context: OpenContext, project: PluginProject): Pro
 /** Forget the remembered conversation but keep the casual project. */
 export function resetCasualLink(context: OpenContext): Promise<void> {
   archiveUndos.delete(context.machineId);
-  patchRecord(context.machineId, {
+  patchCasual(context, {
     workspaceId: undefined,
     workspacePath: undefined,
     sessionId: undefined,
@@ -357,7 +410,7 @@ export function resetCasualLink(context: OpenContext): Promise<void> {
 /** Forget the project as well, so the panel offers the project chooser again. */
 export function changeCasualHome(context: OpenContext): Promise<void> {
   archiveUndos.delete(context.machineId);
-  patchRecord(context.machineId, {
+  patchCasual(context, {
     projectId: undefined,
     projectPath: undefined,
     workspaceId: undefined,
@@ -370,37 +423,25 @@ export function changeCasualHome(context: OpenContext): Promise<void> {
   return openCasual(context);
 }
 
-function openCasualWindow(): Window | null {
-  try {
-    return window.open("", CASUAL_WINDOW_NAME);
-  } catch (error) {
-    console.warn("[pi-web-casual] could not open a separate window", error);
-    return null;
-  }
+/**
+ * Write the strip locally and to the copy the other devices read. A record with
+ * no home yet (first run, after **Change home**) has nowhere to publish to, so it
+ * stays local until a home is resolved.
+ */
+function patchCasual(context: OpenContext, patch: Partial<CasualRecord>): CasualRecord {
+  const record = patchRecord(context.machineId, patch);
+  shareRecord(context.machineId, record);
+  return record;
 }
 
-interface CasualTarget {
-  readonly project: PluginProject;
-  readonly workspace?: CatalogWorkspace;
-  readonly session?: CasualSession;
-  /** Live sessions in the home, newest first; absent when no catalog answered. */
-  readonly sessions?: readonly CasualSession[];
-}
-
-async function resolveCasualTarget(context: OpenContext): Promise<CasualTarget | undefined> {
-  const project = await resolveProject(context);
-  if (project === undefined) return undefined;
-  const record = readRecord(context.machineId);
-  const discovered = await discover(context, project, record);
-  const workspace = discovered.workspace ?? workspaceFromRecord(project, record);
-  const session =
-    discovered.session ?? (discovered.authoritative ? undefined : sessionFromRecord(record));
-  return {
-    project,
-    ...(workspace === undefined ? {} : { workspace }),
-    ...(session === undefined ? {} : { session }),
-    ...(discovered.sessions === undefined ? {} : { sessions: discovered.sessions }),
-  };
+function shareRecord(machineId: string, record: CasualRecord): void {
+  if (record.projectId === undefined || record.workspaceId === undefined) return;
+  queueSharedState(
+    machineId,
+    record.projectId,
+    record.workspaceId,
+    sharedStateOf(record),
+  );
 }
 
 /** Route URL for the remembered casual chat, used by the panel's embedded surface. */
@@ -410,14 +451,38 @@ export function casualChatSrc(context: OpenContext): string | undefined {
   return casualChatUrl(context.machineId, record.projectId, record.workspaceId, record.sessionId);
 }
 
-const pointerRefreshes = new Map<string, string>();
+/** The home as discovery sees it right now. */
+interface CasualHome {
+  readonly project: PluginProject;
+  readonly workspace?: CatalogWorkspace;
+  /** Every live conversation in the home, newest first; absent when discovery failed. */
+  readonly live?: readonly CasualSession[];
+}
 
-/** Live sessions for the home from the host's list route, for hosts without a catalog. */
+async function resolveHome(context: OpenContext): Promise<CasualHome | undefined> {
+  const project = await resolveProject(context);
+  if (project === undefined) return undefined;
+  const record = readRecord(context.machineId);
+  const discovered = await discover(context, project, record);
+  const workspace =
+    discovered.workspace ??
+    workspaceFromRecord(project, record) ??
+    (await hostWorkspace(context, project.id));
+  const live =
+    discovered.sessions ??
+    (await homeSessions(context, workspace?.path ?? record.workspacePath ?? project.path));
+  return {
+    project,
+    ...(workspace === undefined ? {} : { workspace }),
+    ...(live === undefined ? {} : { live }),
+  };
+}
+
+/** Live conversations for the home from the host's list route, for hosts without a catalog. */
 async function homeSessions(
   context: OpenContext,
-  record: CasualRecord,
+  cwd: string | undefined,
 ): Promise<readonly CatalogSession[] | undefined> {
-  const cwd = record.workspacePath ?? record.projectPath;
   if (cwd === undefined) return undefined;
   const sessions = await listHomeSessions(context.machineId, cwd);
   if (sessions === undefined) return undefined;
@@ -433,161 +498,276 @@ async function homeSessions(
 }
 
 /**
- * Keep the pointer and the strip in step with the home without navigating: drop
- * tabs whose conversation was archived or deleted elsewhere, name the ones the
- * catalog knows, and repoint when the active conversation is gone. The key guard
- * stops a patch/render loop.
+ * Read the home, the shared strip, and the host's own session list, then settle
+ * on one strip: a newer shared write from another device wins, conversations the
+ * host no longer has are dropped, names come from the host, and a missing active
+ * conversation falls back to a live one.
+ *
+ * Runs on every panel render (throttled), so a conversation picked on a phone is
+ * the one this browser shows on its next render, without a reload.
  */
-export async function refreshCasualPointer(context: OpenContext): Promise<void> {
-  const record = readRecord(context.machineId);
-  if (record.sessionId === undefined) return;
-  const key = [
-    record.projectId ?? "",
-    record.workspaceId ?? "",
-    record.sessionId,
-    (record.tabs ?? []).map((tab) => tab.sessionId).join(","),
-  ].join("\u0000");
-  if (pointerRefreshes.get(context.machineId) === key) return;
-  pointerRefreshes.set(context.machineId, key);
-
-  const target = await resolveCasualTarget(context);
-  if (target === undefined) return;
-  const latest = readRecord(context.machineId);
-  // The catalog answers on newer hosts; the host's own session list answers for
-  // naming and pruning on older ones. Both are the host's own view of what is
-  // live, so either may decide that the active conversation was archived.
-  const live = target.sessions ?? (await homeSessions(context, latest));
-  const tabs = latest.tabs ?? [];
-  // A conversation that is on screen or just created is kept even when discovery
-  // cannot see it yet: pruning those is what made a new tab look dead and pulled
-  // the user back to an older conversation mid-typing.
-  const keep = (id: string): boolean =>
-    id === latest.sessionId || startedHere.has(id);
-  const nextTabs =
-    live === undefined
-      ? tabs
-      : tabs
-          .filter((tab) => keep(tab.sessionId) || live.some((session) => session.id === tab.sessionId))
-          .map((tab) => {
-            const match = live.find((session) => session.id === tab.sessionId);
-            return match?.name === undefined || match.name === tab.sessionName
-              ? tab
-              : { sessionId: tab.sessionId, sessionName: match.name };
-          });
-  const session = target.session;
-  // Discovery prefers the remembered conversation when it is still live, so a
-  // different id means the active one was archived or deleted elsewhere — unless
-  // it was started here and has simply not been written to disk yet.
-  const activeId = latest.sessionId;
-  const activeMissing =
-    live !== undefined &&
-    activeId !== undefined &&
-    !startedHere.has(activeId) &&
-    !live.some((candidate) => candidate.id === activeId);
-  const nextSession =
-    activeMissing && session !== undefined && session.id !== activeId ? session : undefined;
-
-  // Nothing live left to fall back to: clear the pointer so the tab shows the card
-  // instead of embedding a route the host can no longer open.
-  if (activeMissing && nextSession === undefined) {
-    patchRecord(context.machineId, { sessionId: undefined, sessionName: undefined, tabs: [] });
-    context.requestRender?.();
-    return;
+export async function syncCasualHome(
+  context: OpenContext,
+  options: { readonly force?: boolean; readonly home?: CasualHome } = {},
+): Promise<void> {
+  const run = syncRuns.get(context.machineId);
+  if (run?.running === true) return;
+  const now = Date.now();
+  if (options.force !== true && run !== undefined && now - run.at < SYNC_INTERVAL_MS) return;
+  syncRuns.set(context.machineId, { at: now, running: true });
+  try {
+    const home = options.home ?? (await resolveHome(context));
+    if (home !== undefined) await applySync(context, home);
+  } catch (error) {
+    console.warn("[pi-web-casual] could not refresh the casual home", error);
+  } finally {
+    const latest = syncRuns.get(context.machineId);
+    if (latest !== undefined) latest.running = false;
   }
-  const tabsChanged =
-    nextTabs.length !== tabs.length ||
-    nextTabs.some(
-      (tab, index) =>
-        tab.sessionId !== tabs[index]?.sessionId || tab.sessionName !== tabs[index]?.sessionName,
-    );
-  const locationChanged =
-    latest.projectId !== target.project.id || latest.workspaceId !== target.workspace?.id;
-  if (!tabsChanged && nextSession === undefined && !locationChanged) return;
+}
 
-  if (locationChanged) rememberLocation(context, target.project, target.workspace);
-  patchRecord(context.machineId, {
-    ...(tabsChanged ? { tabs: nextTabs } : {}),
-    ...(nextSession === undefined
-      ? {}
-      : { sessionId: nextSession.id, sessionName: nextSession.name }),
-  });
-  context.requestRender?.();
+interface Reconciled {
+  readonly tabs: CasualTabRecord[];
+  readonly sessionId?: string;
+  readonly sessionName?: string;
+}
+
+function isFreshTab(tab: CasualTabRecord | undefined, now: number): boolean {
+  return tab?.addedAt !== undefined && now - tab.addedAt < FRESH_TAB_GRACE_MS;
 }
 
 /**
- * Open Casual in its own browser tab, or focus the one already open, so the
- * project chat in this tab stays untouched. The window is created synchronously
- * before any await because a popup blocker only allows it inside the gesture.
+ * Settle a strip against the host's own list: conversations the host no longer
+ * has are dropped, a conversation another device just added is kept for a while
+ * even though the host has no file for it yet, names are refreshed, and an
+ * active conversation that is gone falls back to a live one.
  */
-export async function openCasualInOwnTab(context: OpenContext): Promise<void> {
-  const handle = openCasualWindow();
-  const target = await resolveCasualTarget(context);
-  const session = target?.session;
-  if (handle === null || target === undefined || session === undefined) {
-    // Nothing to point a separate window at yet (first run, or no session in
-    // the home): let the normal flow create it here instead.
-    if (handle !== null) handle.close();
-    await openCasual(context);
+function reconcile(
+  record: CasualRecord,
+  live: readonly CasualSession[] | undefined,
+): Reconciled {
+  const tabs = record.tabs ?? [];
+  const activeId = record.sessionId;
+  if (live === undefined) {
+    return {
+      tabs: [...tabs],
+      ...(activeId === undefined ? {} : { sessionId: activeId }),
+      ...(record.sessionName === undefined ? {} : { sessionName: record.sessionName }),
+    };
+  }
+  const now = Date.now();
+  const byId = new Map(live.map((session) => [session.id, session]));
+  const kept = tabs
+    .filter(
+      (tab) =>
+        byId.has(tab.sessionId) || startedHere.has(tab.sessionId) || isFreshTab(tab, now),
+    )
+    .map((tab) => {
+      const name = byId.get(tab.sessionId)?.name;
+      return name === undefined || name === tab.sessionName ? tab : { ...tab, sessionName: name };
+    });
+
+  const activeTab = tabs.find((tab) => tab.sessionId === activeId);
+  const activeStays =
+    activeId !== undefined &&
+    (byId.has(activeId) || startedHere.has(activeId) || isFreshTab(activeTab, now));
+  if (!activeStays) {
+    // The active conversation was archived or deleted elsewhere, or never
+    // existed: fall back to the first conversation the host still has.
+    const fallback = kept.find((tab) => byId.has(tab.sessionId));
+    if (fallback === undefined) return { tabs: [] };
+    return {
+      tabs: kept,
+      sessionId: fallback.sessionId,
+      ...(fallback.sessionName === undefined ? {} : { sessionName: fallback.sessionName }),
+    };
+  }
+  const active = kept.find((tab) => tab.sessionId === activeId);
+  return {
+    tabs: kept,
+    sessionId: activeId,
+    ...(active?.sessionName === undefined ? {} : { sessionName: active.sessionName }),
+  };
+}
+
+function sameTabs(left: readonly CasualTabRecord[], right: readonly CasualTabRecord[]): boolean {
+  return (
+    left.length === right.length &&
+    left.every(
+      (tab, index) =>
+        tab.sessionId === right[index]?.sessionId &&
+        tab.sessionName === right[index]?.sessionName &&
+        tab.addedAt === right[index]?.addedAt,
+    )
+  );
+}
+
+/**
+ * Settle the strip against the shared copy. The read is a round trip, and a tab
+ * action can land while it is in flight, so the record is re-read before
+ * anything is written: a sync that started with an older snapshot gives way
+ * instead of undoing the click that happened meanwhile.
+ */
+async function applySync(context: OpenContext, home: CasualHome): Promise<void> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const before = readRecord(context.machineId);
+    const read = await readSharedFor(context, home);
+    const local = readRecord(context.machineId);
+    if (local.updatedAt !== before.updatedAt) continue;
+    await applyShared(context, home, local, read);
     return;
   }
-  handle.location.replace(
-    casualChatUrl(context.machineId, target.project.id, target.workspace?.id, session.id),
-  );
-  handle.focus();
+}
+
+async function applyShared(
+  context: OpenContext,
+  home: CasualHome,
+  local: CasualRecord,
+  read: SharedStateRead,
+): Promise<void> {
+  const shared = read.kind === "state" ? read.state : undefined;
+
+  // The newer write wins. That is the whole of the cross-device rule: whichever
+  // browser last changed the strip, its strip is the one every browser shows.
+  let record = local;
+  if (shared !== undefined && shared.updatedAt > (local.updatedAt ?? 0)) {
+    record = adoptRecord(context.machineId, {
+      ...local,
+      tabs: [...shared.tabs],
+      sessionId: shared.sessionId,
+      sessionName: undefined,
+      updatedAt: shared.updatedAt,
+    });
+  }
+
+  const next = reconcile(record, home.live);
+  const workspace = home.workspace;
+  const locationChanged =
+    record.projectId !== home.project.id ||
+    record.projectPath !== home.project.path ||
+    (workspace !== undefined && workspace.id !== "" && record.workspaceId !== workspace.id);
+  const stripChanged =
+    !sameTabs(record.tabs ?? [], next.tabs) ||
+    record.sessionId !== next.sessionId ||
+    record.sessionName !== next.sessionName;
+  const seeding = shared === undefined;
+  const sharedChanged =
+    seeding || !sameSharedContent({ tabs: next.tabs, sessionId: next.sessionId }, shared);
+  // An empty strip is never published as the first copy: a browser that has no
+  // Casual history yet must not overwrite the strip another device already
+  // knows, so the file appears with the first conversation instead.
+  const shouldShare = sharedChanged && (!seeding || next.tabs.length > 0);
+  // Only the strip and the active conversation are shared; a refreshed name or a
+  // resolved folder is local knowledge and must not make this browser look like
+  // the last writer. Creating the first copy does have to carry a real stamp,
+  // otherwise every device keeps its own strip forever.
+  const touch = shouldShare && (stripChanged || seeding);
+  // Nothing to say to this browser or to the host: leave both alone, so an idle
+  // render never becomes a write.
+  if (!locationChanged && !stripChanged && !touch) return;
+
+  let patched = record;
+  if (locationChanged || stripChanged || touch) {
+    patched = patchRecord(
+      context.machineId,
+      {
+        ...(locationChanged
+          ? {
+              projectId: home.project.id,
+              projectPath: home.project.path,
+              ...(workspace === undefined
+                ? {}
+                : {
+                    workspaceId: workspace.id,
+                    ...(workspace.path === "" ? {} : { workspacePath: workspace.path }),
+                  }),
+            }
+          : {}),
+        ...(stripChanged
+          ? {
+              tabs: next.tabs,
+              sessionId: next.sessionId,
+              sessionName: next.sessionName,
+            }
+          : {}),
+      },
+      { touch },
+    );
+    // The embedded chat is addressed by the project, workspace, and conversation
+    // in the record, so a newly resolved home changes what the panel shows even
+    // when the strip itself did not move.
+    if (stripChanged || locationChanged) context.requestRender?.();
+  }
+  if (shouldShare) shareRecord(context.machineId, patched);
+}
+
+/** The shared read {@link applySync} needs; a home without a workspace has none. */
+function readSharedFor(
+  context: OpenContext,
+  home: CasualHome,
+): ReturnType<typeof readSharedState> {
+  const workspace = home.workspace;
+  if (workspace === undefined || workspace.id === "") {
+    return Promise.resolve({ kind: "unavailable" } as const);
+  }
+  return readSharedState(context.machineId, home.project.id, workspace.id);
+}
+
+/**
+ * Bring the plugin's own application tab forward without moving the project chat
+ * in the main column. A runtime context can do that; inside the panel there is
+ * nothing to select, so this is a no-op there.
+ */
+async function selectCasualPanel(context: OpenContext): Promise<void> {
+  try {
+    await context.selectPanel?.();
+  } catch (error) {
+    console.warn("[pi-web-casual] could not open the Casual tab", error);
+  }
 }
 
 async function doOpenCasual(context: OpenContext): Promise<void> {
   setStatus(context, { kind: "opening", message: "Finding your casual conversation\u2026" });
   try {
-    if (chooserMachines.delete(context.machineId)) {
-      await showSetup(context, "choose");
-      return;
-    }
+    const home = await ensureHome(context);
+    if (home === undefined) return;
+    await syncCasualHome(context, { force: true, home });
 
-    const project = await resolveProject(context);
-    if (project === undefined) {
-      if (await bootstrapAndReload(context)) return;
-      await showSetup(context, "failed");
-      return;
-    }
-
-    const record = readRecord(context.machineId);
-    const discovered = await discover(context, project, record);
-    const workspace = discovered.workspace ?? workspaceFromRecord(project, record);
-    rememberLocation(context, project, workspace);
-
-    const recordedSession = discovered.authoritative ? undefined : sessionFromRecord(record);
-    const session = discovered.session ?? recordedSession;
-    if (session !== undefined) {
-      rememberSession(context, session);
-      await navigateToCasual(context, project, workspace, session);
-      setStatus(context, {
-        kind: "ready",
-        message: "Casual chat is open.",
-        detail: session.name ?? "Your ongoing conversation",
+    let record = readRecord(context.machineId);
+    if (record.sessionId === undefined) {
+      const cwd = home.workspace?.path ?? home.project.path;
+      const created = await startCasualSession(context.machineId, cwd);
+      if (created === undefined) {
+        setStatus(context, {
+          kind: "error",
+          message: "Could not start the casual conversation.",
+          detail: "Open the casual workspace, press + next to Sessions, then open \u2042 again.",
+          canRetry: true,
+        });
+        return;
+      }
+      startedHere.add(created.id);
+      record = patchCasual(context, {
+        ...(home.workspace === undefined
+          ? {}
+          : { workspaceId: home.workspace.id, workspacePath: home.workspace.path }),
+        tabs: [
+          {
+            sessionId: created.id,
+            ...(created.name === undefined ? {} : { sessionName: created.name }),
+            addedAt: Date.now(),
+          },
+        ],
+        sessionId: created.id,
+        ...(created.name === undefined ? {} : { sessionName: created.name }),
       });
-      return;
     }
 
-    await context.navigate(destination(context, project, workspace), { history: "replace" });
-    const created = await createCasualSession(context, project, workspace, false);
-    if (created === undefined) {
-      setStatus(context, {
-        kind: "error",
-        message: "Could not start the casual conversation.",
-        detail: "Open the casual workspace, press + next to Sessions, then open \u2042 again.",
-        canRetry: true,
-      });
-      return;
-    }
-
-    rememberLocation(context, project, created.workspace);
-    rememberSession(context, created.session);
-    await navigateToCasual(context, project, created.workspace, created.session);
+    await selectCasualPanel(context);
     setStatus(context, {
       kind: "ready",
-      message: "Casual chat is ready.",
-      detail: created.session.name ?? "Your ongoing conversation",
+      message: "Casual chat is open.",
+      detail: record.sessionName ?? "Your ongoing conversation",
     });
   } catch (error) {
     console.warn("[pi-web-casual] open failed", error);
@@ -603,26 +783,11 @@ async function doOpenCasual(context: OpenContext): Promise<void> {
 async function doNewCasualChat(context: OpenContext): Promise<void> {
   setStatus(context, { kind: "opening", message: "Starting a fresh casual chat\u2026" });
   try {
-    if (chooserMachines.delete(context.machineId)) {
-      await showSetup(context, "choose");
-      return;
-    }
+    const home = await ensureHome(context);
+    if (home === undefined) return;
+    await syncCasualHome(context, { force: true, home });
 
-    const project = await resolveProject(context);
-    if (project === undefined) {
-      if (await bootstrapAndReload(context)) return;
-      await showSetup(context, "failed");
-      return;
-    }
-
-    const record = readRecord(context.machineId);
-    const discovered = await discover(context, project, record);
-    const workspace = discovered.workspace ?? workspaceFromRecord(project, record);
-    rememberLocation(context, project, workspace);
-
-    await context.navigate(destination(context, project, workspace), { history: "replace" });
-    const created = await createCasualSession(context, project, workspace, true);
-    if (created === undefined) {
+    if (!(await newCasualTab(context))) {
       setStatus(context, {
         kind: "error",
         message: "Could not start a new casual chat.",
@@ -632,13 +797,11 @@ async function doNewCasualChat(context: OpenContext): Promise<void> {
       return;
     }
 
-    rememberLocation(context, project, created.workspace);
-    rememberSession(context, created.session);
-    await navigateToCasual(context, project, created.workspace, created.session);
+    await selectCasualPanel(context);
     setStatus(context, {
       kind: "ready",
       message: "New casual chat started.",
-      detail: "The previous conversation stays in Sessions.",
+      detail: "The previous conversation stays in the strip and in Sessions.",
     });
   } catch (error) {
     console.warn("[pi-web-casual] new chat failed", error);
@@ -649,6 +812,22 @@ async function doNewCasualChat(context: OpenContext): Promise<void> {
       canRetry: true,
     });
   }
+}
+
+/**
+ * The home, or nothing when the flow already ended in a reload or a setup card.
+ * Bootstrap reloads once, because registering a project has no API.
+ */
+async function ensureHome(context: OpenContext): Promise<CasualHome | undefined> {
+  if (chooserMachines.delete(context.machineId)) {
+    await showSetup(context, "choose");
+    return undefined;
+  }
+  const home = await resolveHome(context);
+  if (home !== undefined) return home;
+  if (await bootstrapAndReload(context)) return undefined;
+  await showSetup(context, "failed");
+  return undefined;
 }
 
 async function showSetup(context: OpenContext, reason: "choose" | "failed" = "failed"): Promise<void> {
@@ -669,7 +848,7 @@ async function bootstrapAndReload(context: OpenContext): Promise<boolean> {
   const result = await bootstrapCasual(context.machineId);
   if (result === undefined) return false;
 
-  patchRecord(context.machineId, {
+  patchCasual(context, {
     projectId: result.project.id,
     projectPath: result.project.path,
     workspaceId: result.workspaceId,
@@ -681,11 +860,7 @@ async function bootstrapAndReload(context: OpenContext): Promise<boolean> {
 
   // Let the panel paint the "Creating..." state before the one-time reload.
   await new Promise<void>((resolve) => window.setTimeout(resolve, 500));
-  if (result.sessionId !== undefined) {
-    reloadToCasualChat(context.machineId, result.project.id, result.workspaceId, result.sessionId);
-  } else {
-    reloadToCasualPanel(context.machineId, result.project.id, result.workspaceId);
-  }
+  reloadToCasualPanel(context.machineId, result.project.id, result.workspaceId);
   return true;
 }
 
@@ -722,11 +897,8 @@ async function listProjects(context: OpenContext): Promise<readonly PluginProjec
 
 interface Discovered {
   readonly workspace?: CatalogWorkspace;
-  readonly session?: CatalogSession;
   /** Every live session in the home, newest first; absent when no catalog answered. */
   readonly sessions?: readonly CatalogSession[];
-  /** True when the catalog was read successfully, even if it found nothing. */
-  readonly authoritative: boolean;
 }
 
 async function discover(
@@ -734,124 +906,43 @@ async function discover(
   project: PluginProject,
   record: CasualRecord,
 ): Promise<Discovered> {
-  if (context.catalog === undefined) return { authoritative: false };
+  if (context.catalog === undefined) return {};
   try {
     const workspaces = await context.catalog.workspaces.list(project.id);
     const workspace =
       workspaces.find((candidate) => candidate.id === record.workspaceId) ??
       workspaces.find((candidate) => candidate.isMain) ??
       workspaces[0];
-    if (workspace === undefined) return { authoritative: true };
+    if (workspace === undefined) return {};
     const sessions = await context.catalog.sessions.list({
       projectId: project.id,
       workspaceId: workspace.id,
     });
-    const live = sessions.filter((session) => !session.archived);
-    const session = live.find((candidate) => candidate.id === record.sessionId) ?? live[0];
-    return {
-      workspace,
-      ...(session === undefined ? {} : { session }),
-      sessions: live,
-      authoritative: true,
-    };
+    return { workspace, sessions: sessions.filter((session) => !session.archived) };
   } catch (error) {
     console.warn("[pi-web-casual] catalog discovery failed", error);
-    return { authoritative: false };
+    return {};
   }
 }
 
-interface CreatedCasual {
-  readonly session: CasualSession;
-  readonly workspace: CatalogWorkspace;
-}
-
-async function createCasualSession(
+/**
+ * The home workspace from the host's own route, used when the record has none
+ * yet — a browser that has never opened Casual, on its first visit.
+ */
+async function hostWorkspace(
   context: OpenContext,
-  project: PluginProject,
-  workspace: CatalogWorkspace | undefined,
-  forceNew: boolean,
-): Promise<CreatedCasual | undefined> {
-  const service = selectionService;
-  if (service === undefined) {
-    console.warn("[pi-web-casual] the host selection service is unavailable");
-    return undefined;
-  }
-
-  const selectedWorkspace = await waitFor(() => {
-    const snapshot = service.getSnapshot();
-    const selected = snapshot.selectedWorkspace;
-    if (selected === undefined || selected.projectId !== project.id) return undefined;
-    if (workspace !== undefined && workspace.id !== "" && selected.id !== workspace.id) return undefined;
-    return selected;
-  }, 8000);
-
-  if (selectedWorkspace === undefined) return undefined;
-  const resolvedWorkspace: CatalogWorkspace = {
-    id: selectedWorkspace.id,
-    projectId: selectedWorkspace.projectId,
-    path: selectedWorkspace.path,
-    label: selectedWorkspace.label,
-    isMain: selectedWorkspace.isMain,
-  };
-  const before = service.getSnapshot().selectedSession;
-
-  if (!forceNew) {
-    const existing = await waitFor(() => {
-      const snapshot = service.getSnapshot();
-      const session = snapshot.selectedSession;
-      if (session === undefined || session.pending || session.archived) return undefined;
-      if (snapshot.selectedWorkspace?.id !== selectedWorkspace.id) return undefined;
-      return session;
-    }, 1500);
-    if (existing !== undefined) {
-      return { session: toCasualSession(existing), workspace: resolvedWorkspace };
-    }
-  }
-
-  if (context.startSession !== undefined) {
-    try {
-      await context.startSession();
-    } catch (error) {
-      console.warn("[pi-web-casual] could not start a session", error);
-      return undefined;
-    }
-  } else {
-    const clicked = await waitFor(() => clickStartSession(), 8000, 150);
-    if (clicked !== true) return undefined;
-  }
-
-  const created = await waitFor(() => {
-    const snapshot = service.getSnapshot();
-    const session = snapshot.selectedSession;
-    if (session === undefined || session.pending || session.archived) return undefined;
-    if (session.id === before?.id) return undefined;
-    if (snapshot.selectedWorkspace?.id !== selectedWorkspace.id) return undefined;
-    return session;
-  }, 25000);
-
-  return created === undefined
-    ? undefined
-    : { session: toCasualSession(created), workspace: resolvedWorkspace };
-}
-
-function toCasualSession(session: PluginSelectedSession): CasualSession {
+  projectId: string,
+): Promise<CatalogWorkspace | undefined> {
+  const workspaces = await listProjectWorkspaces(context.machineId, projectId);
+  if (workspaces === undefined) return undefined;
+  const workspace = workspaces.find((candidate) => candidate.isMain) ?? workspaces[0];
+  if (workspace === undefined) return undefined;
   return {
-    id: session.id,
-    ...(session.name === undefined ? {} : { name: session.name }),
-    cwd: session.cwd,
-    archived: session.archived,
-    runtime: "idle",
-  };
-}
-
-function sessionFromRecord(record: CasualRecord): CasualSession | undefined {
-  if (record.sessionId === undefined) return undefined;
-  return {
-    id: record.sessionId,
-    ...(record.sessionName === undefined ? {} : { name: record.sessionName }),
-    cwd: record.workspacePath ?? "",
-    archived: false,
-    runtime: "not-hosted",
+    id: workspace.id,
+    projectId,
+    path: workspace.path,
+    label: "",
+    isMain: workspace.isMain,
   };
 }
 
@@ -867,55 +958,6 @@ function workspaceFromRecord(
     label: "",
     isMain: false,
   };
-}
-
-function rememberLocation(
-  context: OpenContext,
-  project: PluginProject,
-  workspace: CatalogWorkspace | undefined,
-): void {
-  patchRecord(context.machineId, {
-    projectId: project.id,
-    projectPath: project.path,
-    ...(workspace === undefined
-      ? {}
-      : {
-          workspaceId: workspace.id,
-          ...(workspace.path === "" ? {} : { workspacePath: workspace.path }),
-        }),
-  });
-}
-
-function rememberSession(context: OpenContext, session: CasualSession): void {
-  patchRecord(context.machineId, {
-    sessionId: session.id,
-    sessionName: session.name,
-    ...(session.cwd === "" ? {} : { workspacePath: session.cwd }),
-  });
-}
-
-function destination(
-  context: OpenContext,
-  project: PluginProject,
-  workspace: CatalogWorkspace | undefined,
-  session?: { readonly id: string },
-): PluginNavigationDestination {
-  return {
-    machineId: context.machineId,
-    projectId: project.id,
-    ...(workspace === undefined || workspace.id === "" ? {} : { workspaceId: workspace.id }),
-    ...(session === undefined ? {} : { sessionId: session.id }),
-    view: "chat",
-  };
-}
-
-async function navigateToCasual(
-  context: OpenContext,
-  project: PluginProject,
-  workspace: CatalogWorkspace | undefined,
-  session: { readonly id: string },
-): Promise<void> {
-  await context.navigate(destination(context, project, workspace, session), { history: "replace" });
 }
 
 function catalogOf(value: object): PluginCatalog | undefined {
