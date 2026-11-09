@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/paradise-runner/pi-web-casual/compare/v0.5.0...v0.5.1) (2026-11-09)
+
+
+### Bug Fixes
+
+* keep the embedded chat's pickers on screen ([#13](https://github.com/paradise-runner/pi-web-casual/issues/13)) ([eed6d08](https://github.com/paradise-runner/pi-web-casual/commit/eed6d085662bfe3fee9d1c15b1ca7fc1015095cb))
+
 ## [0.5.0](https://github.com/paradise-runner/pi-web-casual/compare/v0.4.0...v0.5.0) (2026-11-03)
 
 
