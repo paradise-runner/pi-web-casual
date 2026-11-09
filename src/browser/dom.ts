@@ -584,6 +584,45 @@ function embedFrameRoot(frame: HTMLIFrameElement): ShadowRoot | null {
   return doc.querySelector("pi-web-app")?.shadowRoot ?? null;
 }
 
+/** Siblings the inline trim hid, so a branch that turns into a surface can be given back. */
+const trimmedSiblings = new WeakSet<Element>();
+
+function isOpenSurface(element: Element): boolean {
+  if (element.matches("dialog[open]")) return true;
+  try {
+    return element.matches(":popover-open");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * True when the branch is showing something the user opened: a native dialog or
+ * an open popover, in this tree or in a shadow root below it.
+ *
+ * The host renders its pickers as modal elements beside the chat rather than
+ * inside it — the thinking and model pickers, the command dialog, the session
+ * tree, and the auth sheet are all siblings of the conversation layout. Those
+ * are surfaces, not chrome: hiding the branch that owns one closes it the
+ * moment it opens, which is why the thinking level could not be changed in this
+ * tab. Popovers are checked for the same reason even though the chrome here has
+ * none today.
+ */
+function showsOpenSurface(element: Element): boolean {
+  if (isOpenSurface(element)) return true;
+  const stack: Element[] = [element];
+  while (stack.length > 0) {
+    const node = stack.pop() as Element;
+    const children: Element[] = Array.from(node.children);
+    if (node.shadowRoot !== null) children.push(...node.shadowRoot.children);
+    for (const child of children) {
+      if (isOpenSurface(child)) return true;
+      stack.push(child);
+    }
+  }
+  return false;
+}
+
 function hideSiblingsAbove(keep: Element): void {
   let node: Element | null = keep;
   while (node !== null && node.parentElement !== null) {
@@ -592,9 +631,20 @@ function hideSiblingsAbove(keep: Element): void {
       if (sibling === node) continue;
       const tag = sibling.tagName;
       if (tag === "STYLE" || tag === "SCRIPT" || tag === "LINK") continue;
+      if (showsOpenSurface(sibling)) {
+        // A branch that is a surface right now is never trimmed. It may have
+        // been hidden before its dialog opened, so give it back as well: the
+        // picker is set to top layer while invisible otherwise.
+        if (trimmedSiblings.has(sibling)) {
+          (sibling as HTMLElement).style.removeProperty("display");
+          trimmedSiblings.delete(sibling);
+        }
+        continue;
+      }
       const style = (sibling as HTMLElement).style;
       if (style.getPropertyValue("display") !== "none") {
         style.setProperty("display", "none", "important");
+        trimmedSiblings.add(sibling);
       }
     }
     node = parent;
