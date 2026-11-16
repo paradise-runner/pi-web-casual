@@ -659,8 +659,58 @@ function hideSiblingsAbove(keep) {
         node = parent;
     }
 }
+/** PI WEB's input-mode query: a coarse pointer or a narrow screen. */
+const PROMPT_ENTER_MEDIA_QUERY = "(pointer: coarse), (max-width: 760px)";
+let hostInputMode;
+/** The page's own input mode, kept live so a window change reaches the composer. */
+function hostInputModeMedia() {
+    hostInputMode ??= window.matchMedia(PROMPT_ENTER_MEDIA_QUERY);
+    return hostInputMode;
+}
+/**
+ * Give the embedded composer the page's input mode instead of the frame's.
+ *
+ * PI WEB decides Enter-versus-newline from `(pointer: coarse), (max-width:
+ * 760px)`, and a frame's viewport is the panel's width, not the screen's. A
+ * 538 px panel on a desktop therefore reads as a phone: Enter inserts a newline
+ * and only Shift+Enter sends, while the rest of the app sends on Enter. The
+ * query is answered by the page around the frame, so the embedded chat behaves
+ * like the app on the same machine — mobile on a phone, desktop on a desktop.
+ *
+ * Two halves, because the frame's app may have booted before the first pass:
+ * the frame's `matchMedia` answers this one query from the host, and editors
+ * built before that are pointed at the host's live query. The field is private
+ * host state, so an editor that does not expose it is left alone.
+ */
+function bridgeEmbeddedInputMode(frame) {
+    const frameWindow = frame.contentWindow;
+    if (frameWindow === null)
+        return;
+    const marked = frameWindow;
+    if (marked.__piWebCasualInputMode !== true) {
+        const nativeMatchMedia = frameWindow.matchMedia;
+        if (typeof nativeMatchMedia !== "function")
+            return;
+        frameWindow.matchMedia = ((query) => query === PROMPT_ENTER_MEDIA_QUERY
+            ? hostInputModeMedia()
+            : nativeMatchMedia.call(frameWindow, query));
+        marked.__piWebCasualInputMode = true;
+    }
+    const root = embedFrameRoot(frame);
+    if (root === null)
+        return;
+    const media = hostInputModeMedia();
+    for (const editor of root.querySelectorAll("prompt-editor")) {
+        if (editor.mobilePromptEnterMedia === undefined)
+            continue;
+        if (editor.mobilePromptEnterMedia === media)
+            continue;
+        editor.mobilePromptEnterMedia = media;
+    }
+}
 /** One enforcement pass. Returns false until the frame has a chat to keep. */
 function enforceEmbeddedChat(frame) {
+    bridgeEmbeddedInputMode(frame);
     const root = embedFrameRoot(frame);
     if (root === null)
         return false;
