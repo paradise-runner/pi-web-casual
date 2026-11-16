@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.2](https://github.com/paradise-runner/pi-web-casual/compare/v0.5.1...v0.5.2) (2026-11-16)
+
+
+### Bug Fixes
+
+* send on Enter in the embedded chat on a desktop ([#16](https://github.com/paradise-runner/pi-web-casual/issues/16)) ([1e06945](https://github.com/paradise-runner/pi-web-casual/commit/1e0694576de2b88c67cb9997738d4db999437dba))
+
 ## [0.5.1](https://github.com/paradise-runner/pi-web-casual/compare/v0.5.0...v0.5.1) (2026-11-09)
 
 
